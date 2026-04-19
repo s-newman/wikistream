@@ -27,6 +27,13 @@ impl EventSource {
         }
     }
 
+    pub fn with_event_id(mut self, event_id: Option<String>) -> Self {
+        if let Some(id) = event_id {
+            self.event_reader.set_last_event_id(id);
+        }
+        self
+    }
+
     fn connect(&mut self) -> Result<(), Box<dyn Error>> {
         tracing::info!(
             event_id = self.event_reader.last_event_id(),

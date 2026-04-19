@@ -54,6 +54,10 @@ impl EventReader {
         self.buf.extend(buf);
     }
 
+    pub fn set_last_event_id(&mut self, event_id: String) {
+        self.last_event_id = event_id;
+    }
+
     pub fn last_event_id(&self) -> &str {
         &self.last_event_id
     }
