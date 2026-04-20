@@ -3,3 +3,5 @@
 
 # Stream files
 stream-*.txt
+/archive
+events-*.jsonl
