@@ -1,0 +1,5 @@
+# Ignore everything and re-add the specific files we want
+*
+!src
+!Cargo.lock
+!Cargo.toml
