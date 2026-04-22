@@ -27,4 +27,4 @@ docker-build:
 
 # Run ws-sse-cli in a docker container
 docker-run: docker-build
-    docker run --rm -d -v "$(pwd)/data:/var/local/ws-sse-cli" ws-sse-cli:latest
+    docker run --restart unless-stopped -d -v "$(pwd)/data:/var/local/ws-sse-cli" ws-sse-cli:latest
