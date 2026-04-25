@@ -16,3 +16,4 @@ FROM debian:stable-slim AS runtime
 VOLUME /var/local/ws-sse-cli
 COPY --from=builder /app/target/release/ws-sse-cli /usr/local/bin
 ENTRYPOINT ["/usr/local/bin/ws-sse-cli", "--data-dir", "/var/local/ws-sse-cli"]
+CMD ["stream"]

@@ -879,6 +879,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "ws-models",
  "ws-sse",
 ]
 

@@ -1,6 +1,6 @@
-use anyhow::Context;
+use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -8,23 +8,37 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::{fs, io};
 use tracing::Level;
+use ws_models::Event;
 use ws_sse::EventSource;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(version, about)]
 struct Args {
-    /// Event ID to resume from.
-    #[arg(short, long)]
-    event_id: Option<String>,
-
     #[arg(short, long, default_value = "./data")]
     data_dir: PathBuf,
 
     #[arg(short, long, default_value_t = 0)]
     limit: u32,
 
-    #[arg(long, default_value_t = 10_000)]
-    events_per_file: u32,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Consume events from EventStreams and save them to disk.
+    Stream {
+        /// Event ID to resume from.
+        #[arg(short, long)]
+        event_id: Option<String>,
+
+        #[arg(long, default_value_t = 10_000)]
+        events_per_file: u32,
+    },
+    /// Read saved events from disk.
+    ///
+    /// Currently only used to verify the contents of the files stored on disk.
+    Read,
 }
 
 fn main() -> ExitCode {
@@ -42,14 +56,55 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let event_id = match args.event_id {
-        None => match get_event_id_from_files(&args.data_dir) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!(error = ?e, "failed to get latest event ID from data files");
-                return ExitCode::FAILURE;
+    if let Err(e) = match args.command {
+        Command::Stream {
+            event_id,
+            events_per_file,
+        } => stream(&args.data_dir, args.limit, event_id, events_per_file),
+        Command::Read => read(&args.data_dir, args.limit),
+    } {
+        tracing::error!(error = ?e, "unexpected error");
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {
+    let data_files = get_data_files(data_dir).context("failed to read data dir")?;
+
+    let mut total_parsed = 0u64;
+    for data_file in data_files {
+        let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
+        for (idx, line) in ib.lines().enumerate() {
+            let line = line.with_context(|| {
+                tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
+                "failed to read line"
+            })?;
+            serde_json::from_str::<Event>(&line).with_context(|| {
+                tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to parse line as json");
+                "failed to parse line as json"
+            })?;
+            total_parsed += 1;
+
+            if limit > 0 && total_parsed > limit.into() {
+                break;
             }
-        },
+        }
+    }
+
+    Ok(())
+}
+
+fn stream(
+    data_dir: &Path,
+    limit: u32,
+    event_id: Option<String>,
+    events_per_file: u32,
+) -> anyhow::Result<()> {
+    let event_id = match event_id {
+        None => get_event_id_from_files(data_dir)
+            .context("failed to get latest event ID from data files")?,
         x => x,
     };
 
@@ -83,57 +138,48 @@ fn main() -> ExitCode {
                             continue;
                         };
                         let timestamp = partial_evt.meta.dt.timestamp_millis();
-                        let fname = args.data_dir.join(format!("events-{timestamp}.jsonl"));
-                        let file = match File::create(&fname) {
-                            Ok(x) => x,
-                            Err(e) => {
-                                tracing::error!(error = ?e, filename = %fname.display(), "error opening new output file");
-                                return ExitCode::FAILURE;
-                            }
-                        };
-
+                        let fname = data_dir.join(format!("events-{timestamp}.jsonl"));
+                        let file = File::create(&fname).context("error opening new event file")?;
                         tracing::info!(filename = %fname.display(), "starting new output file");
 
                         BufWriter::new(file)
                     }
                 };
 
-                if let Err(e) = writer.write_all(event.data.as_bytes()) {
-                    tracing::error!(error = ?e, "error writing event data to file");
-                    return ExitCode::FAILURE;
-                }
-                if let Err(e) = writer.write_all(b"\n") {
-                    tracing::error!(error = ?e, "error writing newline to file");
-                    return ExitCode::FAILURE;
-                }
-
-                outfile = Some(writer);
-
-                event_count += 1;
-                if args.limit > 0 && event_count >= args.limit {
-                    break;
-                }
-
-                // Rotate to next file after a set number of lines
-                if event_count % args.events_per_file == 0
-                    && let Some(mut writer) = outfile.take()
-                    && let Err(e) = writer.flush()
+                writer
+                    .write_all(event.data.as_bytes())
+                    .context("error writing event data to file")?;
+                writer
+                    .write_all(b"\n")
+                    .context("error writing newline to file")?;
                 {
-                    tracing::error!(error = ?e, "error flushing buffer to disk during file rotation");
-                    // If we haven't flushed everything to disk, we need to quit to prevent
-                    // gaps in the data (the EventReader will try to continue after an event
-                    // ID that wasn't written to disk).
-                    return ExitCode::FAILURE;
+                    outfile = Some(writer);
+
+                    event_count += 1;
+                    if limit > 0 && event_count >= limit {
+                        break;
+                    }
+
+                    // Rotate to next file after a set number of lines
+                    if event_count % events_per_file == 0
+                        && let Some(mut writer) = outfile.take()
+                        && let Err(e) = writer.flush()
+                    {
+                        // If we haven't flushed everything to disk, we need to quit to prevent
+                        // gaps in the data (the EventReader will try to continue after an event
+                        // ID that wasn't written to disk).
+                        Err(e).context("error flushing buffer to disk during file rotation")?
+                    }
                 }
             }
             Err(e) => {
                 tracing::error!(error = %e, "unexpected error when streaming events");
-                return ExitCode::FAILURE;
+                bail!("quitting due to fatal error");
             }
         }
     }
 
-    ExitCode::SUCCESS
+    Ok(())
 }
 
 #[derive(Deserialize)]
