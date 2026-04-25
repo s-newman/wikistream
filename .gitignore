@@ -1,7 +1,8 @@
 # Build artifacts
 /target
 
-# Stream files
+# Data files
 stream-*.txt
 /archive
 events-*.jsonl
+*.parquet
