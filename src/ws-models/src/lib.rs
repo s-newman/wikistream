@@ -1,4 +1,11 @@
+pub mod categorize;
+pub use categorize::Categorize;
+pub mod edit;
+pub use edit::Edit;
 pub mod log;
+pub use log::Log;
+pub mod new;
+pub use new::New;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -16,7 +23,17 @@ pub enum Event {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FullEvent {
+#[serde(tag = "type")]
+#[serde(rename_all = "lowercase")]
+pub enum FullEvent {
+    Categorize(Categorize),
+    Edit(Edit),
+    Log(Log),
+    New(New),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Shared {
     #[serde(rename = "$schema")]
     schema: String,
     meta: Meta,
@@ -27,15 +44,11 @@ pub struct FullEvent {
     timestamp: u64,
     user: String,
     bot: bool,
-
     server_url: String,
     server_name: String,
     server_script_path: String,
     wiki: String,
     parsedcomment: String,
-
-    #[serde(flatten)]
-    inner: Type,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,42 +74,4 @@ pub struct CanaryMeta {
     topic: String,
     partition: u16,
     offset: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "lowercase")]
-pub enum Type {
-    Edit(Edit),
-    Log(log::Log),
-    New(New),
-    Categorize,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Edit {
-    id: u64,
-    notify_url: String,
-    minor: bool,
-    length: OldNew,
-    revision: OldNew,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct OldNew {
-    old: u32,
-    new: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct JustNew {
-    new: u32,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct New {
-    id: u64,
-    patrolled: Option<bool>,
-    length: JustNew,
-    revision: JustNew,
 }
