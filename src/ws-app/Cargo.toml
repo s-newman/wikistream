@@ -1,0 +1,23 @@
+[package]
+name = "ws-app"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ws-app"
+path = "src/bin/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+axum = { version = "0.8.9", features = ["macros"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "postgres", "uuid"] }
+thiserror = "2.0.18"
+tokio = { version = "1.52.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+serde = { version = "1.0.228", features = ["derive"] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+ws-models = { version = "0.1.0", path = "../ws-models" }

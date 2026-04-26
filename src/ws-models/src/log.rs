@@ -5,15 +5,15 @@ use std::collections::HashMap;
 #[derive(Serialize, Deserialize)]
 pub struct Log {
     #[serde(flatten)]
-    shared: super::Shared,
+    pub shared: super::Shared,
     #[serde(flatten)]
-    inner: Inner,
+    pub inner: Inner,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Inner {
-    id: Option<u64>,
-    log_id: u64,
-    log_params: HashMap<String, Value>,
-    log_action_comment: String,
+    pub id: Option<i64>,
+    pub log_id: i64,
+    pub log_params: HashMap<String, Value>,
+    pub log_action_comment: String,
 }

@@ -3,18 +3,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct Edit {
     #[serde(flatten)]
-    shared: super::Shared,
+    pub shared: super::Shared,
     #[serde(flatten)]
-    inner: Inner,
+    pub inner: Inner,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Inner {
-    id: u64,
-    notify_url: String,
-    minor: bool,
-    length: OldNew,
-    revision: OldNew,
+    pub id: i64,
+    pub notify_url: String,
+    pub minor: bool,
+    pub length: OldNew,
+    pub revision: OldNew,
 }
 
 #[derive(Serialize, Deserialize)]

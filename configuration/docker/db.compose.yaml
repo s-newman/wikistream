@@ -1,0 +1,16 @@
+services:
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: "${PGUSER:?error}"
+      POSTGRES_PASSWORD: "${PGPASSWORD:?error}"
+      POSTGRES_DB: "${PGDATABASE:?error}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgres
+
+volumes:
+  db-data: {}

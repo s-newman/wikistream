@@ -3,17 +3,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct New {
     #[serde(flatten)]
-    shared: super::Shared,
+    pub shared: super::Shared,
     #[serde(flatten)]
-    inner: Inner,
+    pub inner: Inner,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Inner {
-    id: u64,
-    patrolled: Option<bool>,
-    length: JustNew,
-    revision: JustNew,
+    pub id: i64,
+    pub patrolled: Option<bool>,
+    pub length: JustNew,
+    pub revision: JustNew,
 }
 
 #[derive(Serialize, Deserialize)]

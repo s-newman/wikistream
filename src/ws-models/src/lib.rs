@@ -9,6 +9,7 @@ pub use new::New;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize)]
@@ -20,6 +21,14 @@ pub enum Event {
         schema: String,
         meta: CanaryMeta,
     },
+}
+
+impl FromStr for Event {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -35,33 +44,33 @@ pub enum FullEvent {
 #[derive(Serialize, Deserialize)]
 pub struct Shared {
     #[serde(rename = "$schema")]
-    schema: String,
-    meta: Meta,
-    namespace: i16,
-    title: String,
-    title_url: String,
-    comment: String,
-    timestamp: u64,
-    user: String,
-    bot: bool,
-    server_url: String,
-    server_name: String,
-    server_script_path: String,
-    wiki: String,
-    parsedcomment: String,
+    pub schema: String,
+    pub meta: Meta,
+    pub namespace: i16,
+    pub title: String,
+    pub title_url: String,
+    pub comment: String,
+    pub timestamp: i64,
+    pub user: String,
+    pub bot: bool,
+    pub server_url: String,
+    pub server_name: String,
+    pub server_script_path: String,
+    pub wiki: String,
+    pub parsedcomment: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Meta {
-    uri: String,
-    request_id: String,
-    id: String,
-    domain: String,
-    stream: String,
-    dt: DateTime<Utc>,
-    topic: String,
-    partition: u16,
-    offset: u64,
+    pub uri: String,
+    pub request_id: String,
+    pub id: String,
+    pub domain: String,
+    pub stream: String,
+    pub dt: DateTime<Utc>,
+    pub topic: String,
+    pub partition: i16,
+    pub offset: i64,
 }
 
 #[derive(Serialize, Deserialize)]

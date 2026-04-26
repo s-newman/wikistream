@@ -1,6 +1,9 @@
 # Build artifacts
 /target
 
+# Host-specific config
+.env
+
 # Data files
 stream-*.txt
 /archive
