@@ -58,5 +58,5 @@ db-up:
     docker compose -f configuration/docker/db.compose.yaml up -d
 
 # Stop the development database
-db-down *ARGS:
-    docker compose -f configuration/docker/db.compose.yaml down {{ARGS}}
+db-down:
+    docker compose -f configuration/docker/db.compose.yaml down -v
