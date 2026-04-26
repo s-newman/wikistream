@@ -2747,10 +2747,12 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "http",
  "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "ureq",
  "ws-models",
  "ws-sse",
 ]

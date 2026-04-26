@@ -34,3 +34,5 @@ create table log_events
     log_params         json        not null,
     log_action_comment text        not null
 );
+
+create unique index idx_log_events_uniq on log_events (meta_request_id, meta_id, meta_dt);

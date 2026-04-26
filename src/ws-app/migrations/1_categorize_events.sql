@@ -28,3 +28,5 @@ create table categorize_events
     meta_partition     integer     not null,
     meta_offset        bigint      not null
 );
+
+create unique index idx_categorize_events_uniq on categorize_events (meta_request_id, meta_id, meta_dt);

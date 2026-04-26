@@ -1,3 +1,4 @@
+use crate::db::DbError;
 use crate::http::responses::{HttpResponse, HttpResult};
 use crate::{DbPool, db};
 use anyhow::Context;
@@ -12,6 +13,7 @@ use ws_models::{Event, FullEvent};
 #[serde(rename_all = "lowercase")]
 pub(super) enum IngestResponse {
     Ok,
+    Conflict,
     Error { message: String },
 }
 
@@ -19,6 +21,7 @@ impl From<IngestResponse> for HttpResponse<IngestResponse> {
     fn from(value: IngestResponse) -> Self {
         match &value {
             IngestResponse::Ok => Self::new(StatusCode::OK, value),
+            IngestResponse::Conflict => Self::new(StatusCode::CONFLICT, value),
             IngestResponse::Error { message: _ } => Self::new(StatusCode::BAD_REQUEST, value),
         }
     }
@@ -43,13 +46,16 @@ pub(super) async fn ingest(
         return Ok(IngestResponse::Ok.into());
     };
 
-    match full_event {
+    let result = match full_event {
         FullEvent::Categorize(x) => db::categorize::create(&db_pool, x).await,
         FullEvent::Edit(x) => db::edit::create(&db_pool, x).await,
         FullEvent::Log(x) => db::log::create(&db_pool, x).await,
         FullEvent::New(x) => db::new::create(&db_pool, x).await,
-    }
-    .context("failed to insert event into database")?;
+    };
 
-    Ok(IngestResponse::Ok.into())
+    Ok(match result {
+        Ok(_) => IngestResponse::Ok.into(),
+        Err(DbError::Conflict) => IngestResponse::Conflict.into(),
+        Err(e) => Err(e).context("unexpected error from database")?,
+    })
 }

@@ -34,3 +34,5 @@ create table new_events
     length             json        not null,
     revision           json        not null
 );
+
+create unique index idx_new_events_uniq on new_events (meta_request_id, meta_id, meta_dt);
