@@ -15,3 +15,4 @@ ws-sse = { path = "../ws-sse" }
 ws-models = { path = "../ws-models" }
 ureq = "3.3.0"
 http = "1.4.0"
+crossbeam = "0.8.4"

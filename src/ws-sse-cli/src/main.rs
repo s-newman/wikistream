@@ -1,13 +1,19 @@
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
+use crossbeam::channel::{Receiver, RecvTimeoutError, SendTimeoutError, Sender, bounded};
+use crossbeam::sync::WaitGroup;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::{fs, io};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::time::Duration;
+use std::{fs, io, thread};
 use tracing::Level;
 use ureq::Agent;
 use ws_models::Event;
@@ -78,13 +84,26 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+const QUEUE_CAP: usize = 100;
+const WORKERS: usize = 16;
+
 fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
     let data_files = get_data_files(data_dir).context("failed to read data dir")?;
-    let agent: Agent = Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into();
     let ingest_endpoint = format!("{}/ingest", server);
+
+    let wg = WaitGroup::new();
+    let (tx, rx) = bounded::<String>(QUEUE_CAP);
+    let exit = Arc::new(AtomicBool::new(false));
+    let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
+    while join_handles.len() < WORKERS {
+        let w_rx = rx.clone();
+        let w_wg = wg.clone();
+        let w_exit = exit.clone();
+        let w_endpoint = ingest_endpoint.clone();
+        join_handles.push(thread::spawn(move || {
+            ingest_worker(w_rx, w_wg, w_exit, w_endpoint)
+        }));
+    }
 
     let mut total_ingested = 0u64;
     for data_file in data_files {
@@ -95,18 +114,66 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
                 tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
                 "failed to read line"
             })?;
-            let resp = agent
-                .post(&ingest_endpoint)
-                .send(line)
-                .context("failed to send request")?;
-            if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
-                bail!("server returned bad status code: {}", resp.status());
-            }
+            send_until(line, &tx, &exit)?;
             total_ingested += 1;
 
             if limit > 0 && total_ingested > limit.into() {
                 return Ok(());
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn send_until<T>(mut msg: T, tx: &Sender<T>, exit: &Arc<AtomicBool>) -> anyhow::Result<()> {
+    while !exit.load(Ordering::Relaxed) {
+        match tx.send_timeout(msg, Duration::from_millis(100)) {
+            Ok(_) => return Ok(()),
+            Err(SendTimeoutError::Timeout(x)) => {
+                msg = x;
+                continue;
+            }
+            Err(SendTimeoutError::Disconnected(_)) => {
+                bail!("failed to send over disconnected work channel")
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn ingest_worker(rx: Receiver<String>, wg: WaitGroup, exit: Arc<AtomicBool>, endpoint: String) {
+    if let Err(e) = ingest_worker_inner(rx, exit.clone(), endpoint) {
+        tracing::error!(error = ?e, "worker failed with error");
+        exit.swap(true, Ordering::Relaxed);
+    }
+    drop(wg)
+}
+
+fn ingest_worker_inner(
+    rx: Receiver<String>,
+    exit: Arc<AtomicBool>,
+    endpoint: String,
+) -> anyhow::Result<()> {
+    let agent: Agent = Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+
+    while !exit.load(Ordering::Relaxed) {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(x) => {
+                let resp = agent
+                    .post(&endpoint)
+                    .send(x)
+                    .context("failed to send request")?;
+                if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
+                    bail!("server returned bad status code: {}", resp.status());
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => bail!("work channel disconnected"),
         }
     }
 

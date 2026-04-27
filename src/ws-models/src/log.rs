@@ -14,6 +14,8 @@ pub struct Log {
 pub struct Inner {
     pub id: Option<i64>,
     pub log_id: i64,
+    pub log_type: String,
+    pub log_action: String,
     pub log_params: HashMap<String, Value>,
     pub log_action_comment: String,
 }

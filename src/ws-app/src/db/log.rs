@@ -7,9 +7,9 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Log) -> Result<Id, DbError
     let (result,) = sqlx::query_as(
         r#"
         insert into log_events
-            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_topic, meta_partition, meta_offset, id, log_id, log_params, log_action_comment)
+            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_topic, meta_partition, meta_offset, id, log_id, log_type, log_action, log_params, log_action_comment)
         values
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
         returning event_id
         "#,
     )
@@ -37,6 +37,8 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Log) -> Result<Id, DbError
         .bind(event.shared.meta.offset)
         .bind(event.inner.id)
         .bind(event.inner.log_id)
+        .bind(event.inner.log_type)
+        .bind(event.inner.log_action)
         .bind(Json(event.inner.log_params))
         .bind(Json(event.inner.log_action_comment))
         .fetch_one(conn)

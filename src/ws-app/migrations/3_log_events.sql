@@ -31,6 +31,8 @@ create table log_events
     -- fields specific to log events
     id                 bigint,
     log_id             bigint      not null,
+    log_type           text        not null,
+    log_action         text        not null,
     log_params         json        not null,
     log_action_comment text        not null
 );
