@@ -1,6 +1,7 @@
 use crate::db::{DbError, Id};
 use sqlx::PgExecutor;
 use sqlx::types::Json;
+use sqlx::types::chrono::NaiveDate;
 use ws_models::Edit;
 
 pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbError> {
@@ -42,6 +43,33 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
         .bind(Json(event.inner.revision))
         .fetch_one(conn)
         .await?;
+
+    Ok(result)
+}
+
+pub async fn most_edited_on_date(
+    conn: impl PgExecutor<'_>,
+    date: NaiveDate,
+) -> Result<Vec<(i64, String, String)>, DbError> {
+    let result = sqlx::query_as(
+        r#"
+        select
+            count(*) as total,
+            title,
+            title_url
+        from edit_events
+        where
+            wiki = 'enwiki'
+            and namespace in (0, 1)
+            and meta_dt::timestamp::date = $1
+        group by title, title_url
+        order by total desc
+        limit 10
+        "#,
+    )
+    .bind(date)
+    .fetch_all(conn)
+    .await?;
 
     Ok(result)
 }

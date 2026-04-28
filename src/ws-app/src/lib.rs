@@ -1,5 +1,6 @@
 pub mod db;
 pub mod http;
+pub mod views;
 
 pub use db::Pool as DbPool;
 

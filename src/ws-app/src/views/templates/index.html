@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Wikistream</title>
+</head>
+<body>
+
+<table>
+    <tr>
+        <th>Page</th>
+        <th>Edits</th>
+    </tr>
+    {% for page in pages %}
+    <tr>
+        <td><a href="{{ page.url }}">{{ page.title }}</a></td>
+        <td>{{ page.edits }}</td>
+    </tr>
+    {% endfor %}
+    <form action="/" method="get">
+        <label for="date">Date</label>
+        <input type="date" name="date" />
+        <input type="submit" value="Check" />
+    </form>
+</table>
+
+</body>
+</html>
