@@ -54,7 +54,7 @@ impl HttpError {
                 // somewhere though, so we'll log the error while converting it
                 // since this code path will be called automatically for us
                 // after a handler function returns.
-                tracing::error!("unknown error: {:?}", e);
+                tracing::error!(error = ?e, "unknown error");
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         }
