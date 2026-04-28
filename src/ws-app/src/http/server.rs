@@ -18,6 +18,8 @@ impl HttpServer {
         let listener = TcpListener::bind(&config.listen_address)
             .await
             .with_context(|| format!("failed to listen on address '{}'", &config.listen_address))?;
+        let local_addr = listener.local_addr().context("failed to get local address")?;
+        tracing::info!("listenining on {}", local_addr);
 
         let router = handlers::router(db_pool);
 
