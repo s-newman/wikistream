@@ -1,5 +1,6 @@
+use crate::db;
 use crate::http::responses::HttpResponse;
-use crate::{DbPool, db};
+use crate::http::server::AppState;
 use axum::extract::State;
 use serde::Serialize;
 
@@ -15,10 +16,10 @@ pub(super) enum Health {
     Unhealthy,
 }
 
-pub(super) async fn health(State(db_pool): State<DbPool>) -> HttpResponse<HealthResponse> {
+pub(super) async fn health(State(app_state): State<AppState>) -> HttpResponse<HealthResponse> {
     let mut status = Health::Healthy;
 
-    if let Err(e) = db::ping(&db_pool).await {
+    if let Err(e) = db::ping(&app_state.db_pool).await {
         tracing::warn!(error = format!("{e:?}"), "database ping failed");
         status = Health::Unhealthy;
     }

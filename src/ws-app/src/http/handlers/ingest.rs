@@ -1,6 +1,7 @@
+use crate::db;
 use crate::db::DbError;
 use crate::http::responses::{HttpResponse, HttpResult};
-use crate::{DbPool, db};
+use crate::http::server::AppState;
 use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -28,7 +29,7 @@ impl From<IngestResponse> for HttpResponse<IngestResponse> {
 }
 
 pub(super) async fn ingest(
-    State(db_pool): State<DbPool>,
+    State(app_state): State<AppState>,
     body: String,
 ) -> HttpResult<IngestResponse> {
     let event = match Event::from_str(&body) {
@@ -47,10 +48,10 @@ pub(super) async fn ingest(
     };
 
     let result = match full_event {
-        FullEvent::Categorize(x) => db::categorize::create(&db_pool, x).await,
-        FullEvent::Edit(x) => db::edit::create(&db_pool, x).await,
-        FullEvent::Log(x) => db::log::create(&db_pool, x).await,
-        FullEvent::New(x) => db::new::create(&db_pool, x).await,
+        FullEvent::Categorize(x) => db::categorize::create(&app_state.db_pool, x).await,
+        FullEvent::Edit(x) => db::edit::create(&app_state.db_pool, x).await,
+        FullEvent::Log(x) => db::log::create(&app_state.db_pool, x).await,
+        FullEvent::New(x) => db::new::create(&app_state.db_pool, x).await,
     };
 
     Ok(match result {
