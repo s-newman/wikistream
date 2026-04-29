@@ -9,3 +9,5 @@ stream-*.txt
 /archive
 events-*.jsonl
 *.parquet
+.ws-ingest-state.json
+.tmp.ws-ingest-state.json

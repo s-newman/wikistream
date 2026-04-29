@@ -1,3 +1,6 @@
+mod ingest_state;
+
+use crate::ingest_state::IngestState;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
@@ -9,6 +12,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
@@ -84,12 +88,14 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+const UPDATE_STATE_INTERVAL: u64 = 1000;
 const QUEUE_CAP: usize = 100;
 const WORKERS: usize = 16;
 
 fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
-    let data_files = get_data_files(data_dir).context("failed to read data dir")?;
+    let mut data_files = get_data_files(data_dir).context("failed to read data dir")?;
     let ingest_endpoint = format!("{}/ingest", server);
+    let previous_progress = IngestState::load(data_dir).context("failed to load ingest state")?;
 
     let wg = WaitGroup::new();
     let (tx, rx) = bounded::<String>(QUEUE_CAP);
@@ -105,17 +111,53 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
         }));
     }
 
+    if let Some(progress) = previous_progress
+        && let Some(newer_file_idx) = data_files.iter().position(|x| {
+            let file_ts = match timestamp_from_file(x) {
+                Ok(ts) => ts,
+                Err(e) => {
+                    tracing::error!(error = %e, filename = %x.display(), "BUG: failed to parse timestamp from file");
+                    panic!("failed to parse timestamp from file");
+                }
+            };
+            file_ts > progress.last_ingested_ms
+        }) {
+            // If we found a file newer than the progress timestamp, resume with at most two files
+            // before that
+            let resume_file_idx = newer_file_idx.saturating_sub(2);
+            let split = data_files.split_off(resume_file_idx);
+            data_files = split;
+        }
+
     let mut total_ingested = 0u64;
     for data_file in data_files {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
         for (idx, line) in ib.lines().enumerate() {
             let line = line.with_context(|| {
-                tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
-                "failed to read line"
-            })?;
+                    tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
+                    "failed to read line"
+                })?;
+            let line_clone = if total_ingested.is_multiple_of(UPDATE_STATE_INTERVAL) {
+                Some(line.clone())
+            } else {
+                None
+            };
             send_until(line, &tx, &exit)?;
             total_ingested += 1;
+
+            if let Some(line) = line_clone {
+                let Ok(partial_evt) = serde_json::from_str::<PartialEvent>(&line) else {
+                    tracing::warn!(data = &line, "failed to parse event data as partial event");
+                    continue;
+                };
+                let ingest_state = IngestState {
+                    last_ingested_ms: partial_evt.meta.dt.timestamp_millis(),
+                };
+                if let Err(e) = ingest_state.save(data_dir) {
+                    tracing::error!(error = %e, "failed to record ingest progress");
+                }
+            }
 
             if limit > 0 && total_ingested > limit.into() {
                 return Ok(());
@@ -124,6 +166,21 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn timestamp_from_file(file: &Path) -> anyhow::Result<i64> {
+    let Some(filename) = file.file_name() else {
+        bail!("no file name");
+    };
+    let filename = filename.to_string_lossy();
+    let Some(end) = filename.strip_prefix("events-") else {
+        bail!("wrong filename prefix");
+    };
+    let Some(timestamp) = end.strip_suffix(".jsonl") else {
+        bail!("wrong filename suffix");
+    };
+
+    i64::from_str(timestamp).context("failed to parse filename part as timestamp")
 }
 
 fn send_until<T>(mut msg: T, tx: &Sender<T>, exit: &Arc<AtomicBool>) -> anyhow::Result<()> {
