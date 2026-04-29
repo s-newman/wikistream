@@ -111,8 +111,8 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
         }));
     }
 
-    if let Some(progress) = previous_progress
-        && let Some(newer_file_idx) = data_files.iter().position(|x| {
+    if let Some(progress) = previous_progress {
+        if let Some(newer_file_idx) = data_files.iter().position(|x| {
             let file_ts = match timestamp_from_file(x) {
                 Ok(ts) => ts,
                 Err(e) => {
@@ -127,7 +127,14 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
             let resume_file_idx = newer_file_idx.saturating_sub(2);
             let split = data_files.split_off(resume_file_idx);
             data_files = split;
+        } else {
+            // The timestamps in all filenames we found are older than the saved progress. Go ahead
+            // and re-ingest the most recent three files before that.
+            let resume_file_idx = data_files.len() - 3;
+            let split = data_files.split_off(resume_file_idx);
+            data_files = split;
         }
+    }
 
     let mut total_ingested = 0u64;
     for data_file in data_files {
