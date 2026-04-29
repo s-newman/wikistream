@@ -137,6 +137,7 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
     }
 
     let mut total_ingested = 0u64;
+    let mut quit = false;
     for data_file in data_files {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
@@ -150,7 +151,11 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
             } else {
                 None
             };
-            send_until(line, &tx, &exit)?;
+            if let Err(e) = send_until(line, &tx, &exit) {
+                tracing::error!(error = %e, "exiting main ingest loop due to error");
+                quit = true;
+                break;
+            }
             total_ingested += 1;
 
             if let Some(line) = line_clone {
@@ -170,7 +175,14 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
                 return Ok(());
             }
         }
+
+        if quit {
+            break;
+        }
     }
+
+    exit.swap(true, Ordering::Relaxed);
+    wg.wait();
 
     Ok(())
 }
@@ -202,6 +214,10 @@ fn send_until<T>(mut msg: T, tx: &Sender<T>, exit: &Arc<AtomicBool>) -> anyhow::
                 bail!("failed to send over disconnected work channel")
             }
         }
+    }
+
+    if exit.load(Ordering::Relaxed) {
+        bail!("exiting due to worker error")
     }
 
     Ok(())
