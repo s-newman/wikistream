@@ -43,7 +43,7 @@ docker-run-app: docker-build-app
     docker run \
         --restart unless-stopped \
         -d \
-        -p 4000:4000 \
+        -p 80:4000 \
         --network docker_default \
         --env-file .env \
         -e PGHOST=db \
