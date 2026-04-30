@@ -24,6 +24,7 @@ run *ARGS:
     cargo run --package ws-sse-cli -- {{ARGS}}
 
 # Run ws-app
+[working-directory: 'src/ws-app']
 run-app *ARGS:
     cargo run --package ws-app -- {{ARGS}}
 

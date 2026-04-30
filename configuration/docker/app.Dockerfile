@@ -13,7 +13,10 @@ COPY . .
 RUN cargo build --package ws-app --release
 
 FROM debian:stable-slim AS runtime
+WORKDIR /var/www
 VOLUME /var/local/ws-app
 EXPOSE 4000
 COPY --from=builder /app/target/release/ws-app /usr/local/bin
+RUN mkdir /var/www/assets
+COPY --from=builder /app/src/ws-app/assets /var/www/assets
 ENTRYPOINT ["/usr/local/bin/ws-app"]
