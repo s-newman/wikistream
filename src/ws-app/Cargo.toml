@@ -22,3 +22,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 ws-models = { version = "0.1.0", path = "../ws-models" }
 minijinja = "2.19.0"
+chrono = "0.4.44"

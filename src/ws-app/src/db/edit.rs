@@ -1,7 +1,7 @@
 use crate::db::{DbError, Id};
+use chrono::NaiveDate;
 use sqlx::PgExecutor;
 use sqlx::types::Json;
-use sqlx::types::chrono::NaiveDate;
 use ws_models::Edit;
 
 pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbError> {
@@ -49,7 +49,7 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
 
 pub async fn most_edited_on_date(
     conn: impl PgExecutor<'_>,
-    date: NaiveDate,
+    date: &NaiveDate,
 ) -> Result<Vec<(i64, String, String)>, DbError> {
     let result = sqlx::query_as(
         r#"
