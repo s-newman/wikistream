@@ -8,9 +8,9 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
     let (result,) = sqlx::query_as(
         r#"
         insert into edit_events
-            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
+            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_dt_date, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
         values
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
         returning event_id
         "#,
     )
@@ -33,6 +33,7 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
         .bind(event.shared.meta.domain)
         .bind(event.shared.meta.stream)
         .bind(event.shared.meta.dt)
+        .bind(event.shared.meta.dt.date_naive())
         .bind(event.shared.meta.topic)
         .bind(event.shared.meta.partition)
         .bind(event.shared.meta.offset)
@@ -61,7 +62,7 @@ pub async fn most_edited_on_date(
         where
             wiki = 'enwiki'
             and namespace in (0, 1)
-            and meta_dt::timestamp::date = $1
+            and meta_dt_date = $1
         group by title, title_url
         order by total desc
         limit 10
