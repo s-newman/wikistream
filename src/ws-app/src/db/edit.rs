@@ -65,7 +65,7 @@ pub async fn most_edited_on_date(
             and meta_dt_date = $1
         group by title, title_url
         order by total desc
-        limit 10
+        limit 25
         "#,
     )
     .bind(date)
