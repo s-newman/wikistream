@@ -60,8 +60,7 @@ pub async fn most_edited_on_date(
             title_url
         from edit_events
         where
-            wiki = 'enwiki'
-            and namespace in (0, 1)
+            namespace in (0, 1)
             and meta_dt_date = $1
         group by title, title_url
         order by total desc

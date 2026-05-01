@@ -14,6 +14,7 @@ use ws_models::{Event, FullEvent};
 #[serde(rename_all = "lowercase")]
 pub(super) enum IngestResponse {
     Ok,
+    Accepted,
     Conflict,
     Error { message: String },
 }
@@ -22,11 +23,14 @@ impl From<IngestResponse> for HttpResponse<IngestResponse> {
     fn from(value: IngestResponse) -> Self {
         match &value {
             IngestResponse::Ok => Self::new(StatusCode::OK, value),
+            IngestResponse::Accepted => Self::new(StatusCode::ACCEPTED, value),
             IngestResponse::Conflict => Self::new(StatusCode::CONFLICT, value),
             IngestResponse::Error { message: _ } => Self::new(StatusCode::BAD_REQUEST, value),
         }
     }
 }
+
+const ENGLISH_WIKI: &str = "enwiki";
 
 pub(super) async fn ingest(
     State(app_state): State<AppState>,
@@ -47,12 +51,13 @@ pub(super) async fn ingest(
         return Ok(IngestResponse::Ok.into());
     };
 
-    let result = match full_event {
-        FullEvent::Categorize(x) => db::categorize::create(&app_state.db_pool, x).await,
-        FullEvent::Edit(x) => db::edit::create(&app_state.db_pool, x).await,
-        FullEvent::Log(x) => db::log::create(&app_state.db_pool, x).await,
-        FullEvent::New(x) => db::new::create(&app_state.db_pool, x).await,
+    let FullEvent::Edit(edit_event) = full_event else {
+        return Ok(IngestResponse::Accepted.into());
     };
+    if edit_event.shared.wiki != ENGLISH_WIKI {
+        return Ok(IngestResponse::Accepted.into());
+    }
+    let result = db::edit::create(&app_state.db_pool, edit_event).await;
 
     Ok(match result {
         Ok(_) => IngestResponse::Ok.into(),

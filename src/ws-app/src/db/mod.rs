@@ -3,10 +3,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::time::Duration;
 use uuid::Uuid;
 
-pub mod categorize;
 pub mod edit;
-pub mod log;
-pub mod new;
 
 pub type Pool = sqlx::PgPool;
 
