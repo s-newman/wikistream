@@ -20,7 +20,7 @@ use std::time::Duration;
 use std::{fs, io, thread};
 use tracing::Level;
 use ureq::Agent;
-use ws_models::Event;
+use ws_models::{Event, FullEvent};
 use ws_sse::EventSource;
 
 #[derive(Parser)]
@@ -244,6 +244,20 @@ fn ingest_worker_inner(
     while !exit.load(Ordering::Relaxed) {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(x) => {
+                let event = match Event::from_str(&x) {
+                    Ok(y) => y,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to parse event");
+                        continue;
+                    }
+                };
+                let Event::Event(FullEvent::Edit(event)) = event else {
+                    continue;
+                };
+                if event.shared.wiki != "enwiki" {
+                    continue;
+                }
+
                 let resp = agent
                     .post(&endpoint)
                     .send(x)
