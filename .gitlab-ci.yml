@@ -33,7 +33,7 @@ build:docker-app:
     when: always
     expire_in: 1 week
     paths:
-      - ws-app_latest.tar
+      - ws-app.tar
 
 build:docker-cli:
   stage: build
@@ -46,7 +46,7 @@ build:docker-cli:
     when: always
     expire_in: 1 week
     paths:
-      - ws-sse-cli_latest.tar
+      - ws-sse-cli.tar
 
 deploy-job:
   stage: deploy
