@@ -1,0 +1,69 @@
+stages:
+  - check
+  - build
+  - deploy
+
+check-job:
+  stage: check
+  tags:
+    - altoidtin
+  image: rust:latest
+  before_script:
+    - rustup component add rustfmt clippy
+    - apt-get update && apt-get install -y shellcheck
+  script:
+    - scripts/check.sh
+
+build-job:
+  stage: build
+  tags:
+    - altoidtin
+  image: rust:latest
+  script:
+    - scripts/build.sh --release
+
+build:docker-app:
+  stage: build
+  tags:
+    - altoidtin-vm
+  script:
+    - docker build -t ws-app:latest -f configuration/docker/app.Dockerfile .
+    - docker save --output ws-app.tar ws-app:latest
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - ws-app_latest.tar
+
+build:docker-cli:
+  stage: build
+  tags:
+    - altoidtin-vm
+  script:
+    - docker build -t ws-sse-cli:latest -f configuration/docker/cli.Dockerfile .
+    - docker save --output ws-sse-cli.tar ws-sse-cli:latest
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - ws-sse-cli_latest.tar
+
+deploy-job:
+  stage: deploy
+  tags:
+    - altoidtin-vm
+  environment: production
+  needs:
+    - build:docker-app
+    - build:docker-cli
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY --username $CI_REGISTRY_USER --password-stdin
+  script:
+    - docker import ws-app.tar
+    - docker import ws-sse-cli.tar
+    - docker image tag ws-app:latest $CI_REGISTRY_IMAGE/ws-app:latest
+    - docker image tag ws-sse-cli:latest $CI_REGISTRY_IMAGE/ws-sse-cli:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+    - when: never
