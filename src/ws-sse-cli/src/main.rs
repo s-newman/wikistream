@@ -14,7 +14,7 @@ use std::str::FromStr;
 use std::{fs, io};
 use tracing::Level;
 use ureq::Agent;
-use ws_models::{Edit, Event, FullEvent};
+use ws_models::{Event, FullEvent};
 use ws_sse::EventSource;
 
 #[derive(Parser)]
@@ -82,7 +82,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-const BATCH_SIZE: usize = 100;
+const BATCH_SIZE: usize = 1000;
 
 fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
     let mut data_files = get_data_files(data_dir).context("failed to read data dir")?;
@@ -120,7 +120,7 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
         .into();
 
     let mut total_ingested = 0u64;
-    let mut batch: Vec<Edit> = Vec::new();
+    let mut batch: Vec<Event> = Vec::new();
     for data_file in data_files {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
@@ -134,50 +134,88 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
                 "failed to parse line as event"
             })?;
 
-            let Event::Event(FullEvent::Edit(event)) = event else {
+            let Event::Event(FullEvent::Edit(edit_event)) = &event else {
                 continue;
             };
-            if event.shared.wiki != "enwiki" {
+            if edit_event.shared.wiki != "enwiki" {
                 continue;
             }
             batch.push(event);
             if !batch.is_empty() && batch.len().is_multiple_of(BATCH_SIZE) {
-                let mut buf = BufWriter::new(Vec::new());
-                for event in &batch {
-                    serde_json::to_writer(&mut buf, event).context("failed to serialize event")?;
-                }
-                let buf = buf
-                    .into_inner()
-                    .context("failed to get inner vec from buffer")?;
-                let resp = agent
-                    .post(&ingest_endpoint)
-                    .send(&buf)
-                    .context("failed to send request")?;
-                if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
-                    bail!("server returned bad status code: {}", resp.status());
-                }
-
-                total_ingested += batch.len() as u64;
-                let ingest_state = IngestState {
-                    last_ingested_ms: batch
-                        .last()
-                        .expect("batch was empty!")
-                        .shared
-                        .meta
-                        .dt
-                        .timestamp_millis(),
-                };
-                if let Err(e) = ingest_state.save(data_dir) {
-                    tracing::error!(error = %e, "failed to record ingest progress");
-                }
-                batch.clear();
+                ingest_batch(
+                    &mut batch,
+                    &mut total_ingested,
+                    &agent,
+                    &ingest_endpoint,
+                    data_dir,
+                )?;
             }
 
             if limit > 0 && total_ingested > limit.into() {
                 return Ok(());
             }
         }
+
+        if !batch.is_empty() {
+            ingest_batch(
+                &mut batch,
+                &mut total_ingested,
+                &agent,
+                &ingest_endpoint,
+                data_dir,
+            )?;
+        }
+
+        if limit > 0 && total_ingested > limit.into() {
+            return Ok(());
+        }
     }
+
+    Ok(())
+}
+
+fn ingest_batch(
+    batch: &mut Vec<Event>,
+    total_ingested: &mut u64,
+    agent: &Agent,
+    endpoint: &str,
+    data_dir: &Path,
+) -> anyhow::Result<()> {
+    let mut buf = BufWriter::new(Vec::new());
+    for event in batch.iter() {
+        serde_json::to_writer(&mut buf, event).context("failed to serialize event")?;
+        buf.write_all(b"\n").context("failed to write newline")?;
+    }
+    let buf = buf
+        .into_inner()
+        .context("failed to get inner vec from buffer")?;
+    let resp = agent
+        .post(endpoint)
+        .send(&buf)
+        .context("failed to send request")?;
+    if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
+        bail!("server returned bad status code: {}", resp.status());
+    }
+
+    *total_ingested += batch.len() as u64;
+    let last_edit = batch
+        .iter()
+        .filter_map(|e| {
+            if let Event::Event(FullEvent::Edit(edit)) = e {
+                Some(edit)
+            } else {
+                None
+            }
+        })
+        .next_back()
+        .expect("batch was empty!");
+    let ingest_state = IngestState {
+        last_ingested_ms: last_edit.shared.meta.dt.timestamp_millis(),
+    };
+    if let Err(e) = ingest_state.save(data_dir) {
+        tracing::error!(error = %e, "failed to record ingest progress");
+    }
+    batch.clear();
 
     Ok(())
 }
