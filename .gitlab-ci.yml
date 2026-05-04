@@ -59,8 +59,10 @@ deploy-job:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY --username $CI_REGISTRY_USER --password-stdin
   script:
-    - docker import ws-app.tar $CI_REGISTRY_IMAGE/ws-app:latest
-    - docker import ws-sse-cli.tar $CI_REGISTRY_IMAGE/ws-sse-cli:latest
+    - docker load ws-app.tar
+    - docker load ws-sse-cli.tar
+    - docker tag ws-app:latest $CI_REGISTRY_IMAGE/ws-app:latest
+    - docker tag ws-sse-cli:latest $CI_REGISTRY_IMAGE/ws-sse-cli:latest
     - docker image push $CI_REGISTRY_IMAGE/ws-app:latest
     - docker image push $CI_REGISTRY_IMAGE/ws-sse-cli:latest
   rules:
