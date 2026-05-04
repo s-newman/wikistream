@@ -1,26 +1,21 @@
+use crate::db;
 use crate::db::DbError;
 use crate::http::responses::{HttpResponse, HttpResult};
 use crate::http::server::AppState;
-use crate::{DbPool, db};
-use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Serialize;
 use std::str::FromStr;
-use ws_models::{Event, FullEvent};
+use ws_models::{Edit, Event, FullEvent};
 
 #[derive(Serialize)]
 #[serde(tag = "status")]
 #[serde(rename_all = "lowercase")]
 pub(super) enum IngestResponse {
     Ok,
-    #[allow(dead_code)]
     Accepted,
-    #[allow(dead_code)]
     Conflict,
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 impl From<IngestResponse> for HttpResponse<IngestResponse> {
@@ -40,6 +35,7 @@ pub(super) async fn ingest(
     State(app_state): State<AppState>,
     body: String,
 ) -> HttpResult<IngestResponse> {
+    let mut events: Vec<Edit> = Vec::new();
     for line in body.lines() {
         let event = match Event::from_str(line) {
             Ok(x) => x,
@@ -51,30 +47,34 @@ pub(super) async fn ingest(
             }
         };
 
-        ingest_one(&app_state.db_pool, event)
-            .await
-            .context("unexpected error from database")?;
+        // Skip canary events
+        let Event::Event(full_event) = event else {
+            continue;
+        };
+        // Only ingest edit events in english wiki for now
+        let FullEvent::Edit(edit_event) = full_event else {
+            continue;
+        };
+        if edit_event.shared.wiki != ENGLISH_WIKI {
+            continue;
+        }
+
+        events.push(edit_event);
     }
 
-    Ok(IngestResponse::Ok.into())
-}
-
-async fn ingest_one(db_pool: &DbPool, event: Event) -> Result<(), DbError> {
-    // Skip canary events
-    let Event::Event(full_event) = event else {
-        return Ok(());
-    };
-
-    let FullEvent::Edit(edit_event) = full_event else {
-        return Ok(());
-    };
-    if edit_event.shared.wiki != ENGLISH_WIKI {
-        return Ok(());
+    if events.is_empty() {
+        return Ok(IngestResponse::Accepted.into());
     }
 
-    match db::edit::create(db_pool, edit_event).await {
-        Ok(_) => Ok(()),
-        Err(DbError::Conflict) => Ok(()),
-        Err(e) => Err(e),
+    match db::edit::bulk_create(&app_state.db_pool, events).await {
+        Ok(_) => Ok(IngestResponse::Ok.into()),
+        Err(DbError::Conflict) => Ok(IngestResponse::Conflict.into()),
+        Err(e) => {
+            tracing::error!(error = %e, "unexpected error from database");
+            Ok(IngestResponse::Error {
+                message: e.to_string(),
+            }
+            .into())
+        }
     }
 }

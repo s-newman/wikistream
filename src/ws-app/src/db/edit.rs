@@ -1,7 +1,7 @@
 use crate::db::{DbError, Id};
 use chrono::NaiveDate;
-use sqlx::PgExecutor;
 use sqlx::types::Json;
+use sqlx::{PgExecutor, Postgres, QueryBuilder};
 use ws_models::Edit;
 
 pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbError> {
@@ -46,6 +46,53 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
         .await?;
 
     Ok(result)
+}
+
+pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result<(), DbError> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        r#"
+        insert into edit_events
+            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_dt_date, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
+        "#,
+    );
+    qb.push_values(events.into_iter(), |mut b, event| {
+        b.push_bind(event.shared.schema)
+            .push_bind(event.shared.namespace)
+            .push_bind(event.shared.title)
+            .push_bind(event.shared.title_url)
+            .push_bind(event.shared.comment)
+            .push_bind(event.shared.timestamp)
+            .push_bind(event.shared.user)
+            .push_bind(event.shared.bot)
+            .push_bind(event.shared.server_url)
+            .push_bind(event.shared.server_name)
+            .push_bind(event.shared.server_script_path)
+            .push_bind(event.shared.wiki)
+            .push_bind(event.shared.parsedcomment)
+            .push_bind(event.shared.meta.uri)
+            .push_bind(event.shared.meta.request_id)
+            .push_bind(event.shared.meta.id)
+            .push_bind(event.shared.meta.domain)
+            .push_bind(event.shared.meta.stream)
+            .push_bind(event.shared.meta.dt)
+            .push_bind(event.shared.meta.dt.date_naive())
+            .push_bind(event.shared.meta.topic)
+            .push_bind(event.shared.meta.partition)
+            .push_bind(event.shared.meta.offset)
+            .push_bind(event.inner.id)
+            .push_bind(event.inner.notify_url)
+            .push_bind(event.inner.minor)
+            .push_bind(Json(event.inner.length))
+            .push_bind(Json(event.inner.revision));
+    });
+    qb.push(
+        r#"
+        on conflict do nothing
+        "#,
+    );
+    qb.build().fetch_all(conn).await?;
+
+    Ok(())
 }
 
 pub async fn most_edited_on_date(
