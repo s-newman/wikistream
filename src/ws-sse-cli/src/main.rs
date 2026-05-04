@@ -4,8 +4,6 @@ use crate::ingest_state::IngestState;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use crossbeam::channel::{Receiver, RecvTimeoutError, SendTimeoutError, Sender, bounded};
-use crossbeam::sync::WaitGroup;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -13,14 +11,10 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::JoinHandle;
-use std::time::Duration;
-use std::{fs, io, thread};
+use std::{fs, io};
 use tracing::Level;
 use ureq::Agent;
-use ws_models::{Event, FullEvent};
+use ws_models::{Edit, Event, FullEvent};
 use ws_sse::EventSource;
 
 #[derive(Parser)]
@@ -88,28 +82,12 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-const UPDATE_STATE_INTERVAL: u64 = 1000;
-const QUEUE_CAP: usize = 100;
-const WORKERS: usize = 16;
+const BATCH_SIZE: usize = 100;
 
 fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
     let mut data_files = get_data_files(data_dir).context("failed to read data dir")?;
     let ingest_endpoint = format!("{}/ingest", server);
     let previous_progress = IngestState::load(data_dir).context("failed to load ingest state")?;
-
-    let wg = WaitGroup::new();
-    let (tx, rx) = bounded::<String>(QUEUE_CAP);
-    let exit = Arc::new(AtomicBool::new(false));
-    let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
-    while join_handles.len() < WORKERS {
-        let w_rx = rx.clone();
-        let w_wg = wg.clone();
-        let w_exit = exit.clone();
-        let w_endpoint = ingest_endpoint.clone();
-        join_handles.push(thread::spawn(move || {
-            ingest_worker(w_rx, w_wg, w_exit, w_endpoint)
-        }));
-    }
 
     if let Some(progress) = previous_progress {
         if let Some(newer_file_idx) = data_files.iter().position(|x| {
@@ -136,8 +114,13 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
         }
     }
 
+    let agent: Agent = Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+
     let mut total_ingested = 0u64;
-    let mut quit = false;
+    let mut batch: Vec<Edit> = Vec::new();
     for data_file in data_files {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
@@ -146,43 +129,55 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
                     tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
                     "failed to read line"
                 })?;
-            let line_clone = if total_ingested.is_multiple_of(UPDATE_STATE_INTERVAL) {
-                Some(line.clone())
-            } else {
-                None
-            };
-            if let Err(e) = send_until(line, &tx, &exit) {
-                tracing::error!(error = %e, "exiting main ingest loop due to error");
-                quit = true;
-                break;
-            }
-            total_ingested += 1;
+            let event = Event::from_str(&line).with_context(|| {
+                tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to parse line as event");
+                "failed to parse line as event"
+            })?;
 
-            if let Some(line) = line_clone {
-                let Ok(partial_evt) = serde_json::from_str::<PartialEvent>(&line) else {
-                    tracing::warn!(data = &line, "failed to parse event data as partial event");
-                    continue;
-                };
+            let Event::Event(FullEvent::Edit(event)) = event else {
+                continue;
+            };
+            if event.shared.wiki != "enwiki" {
+                continue;
+            }
+            batch.push(event);
+            if !batch.is_empty() && batch.len().is_multiple_of(BATCH_SIZE) {
+                let mut buf = BufWriter::new(Vec::new());
+                for event in &batch {
+                    serde_json::to_writer(&mut buf, event).context("failed to serialize event")?;
+                }
+                let buf = buf
+                    .into_inner()
+                    .context("failed to get inner vec from buffer")?;
+                let resp = agent
+                    .post(&ingest_endpoint)
+                    .send(&buf)
+                    .context("failed to send request")?;
+                if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
+                    bail!("server returned bad status code: {}", resp.status());
+                }
+
+                total_ingested += batch.len() as u64;
                 let ingest_state = IngestState {
-                    last_ingested_ms: partial_evt.meta.dt.timestamp_millis(),
+                    last_ingested_ms: batch
+                        .last()
+                        .expect("batch was empty!")
+                        .shared
+                        .meta
+                        .dt
+                        .timestamp_millis(),
                 };
                 if let Err(e) = ingest_state.save(data_dir) {
                     tracing::error!(error = %e, "failed to record ingest progress");
                 }
+                batch.clear();
             }
 
             if limit > 0 && total_ingested > limit.into() {
                 return Ok(());
             }
         }
-
-        if quit {
-            break;
-        }
     }
-
-    exit.swap(true, Ordering::Relaxed);
-    wg.wait();
 
     Ok(())
 }
@@ -202,83 +197,12 @@ fn timestamp_from_file(file: &Path) -> anyhow::Result<i64> {
     i64::from_str(timestamp).context("failed to parse filename part as timestamp")
 }
 
-fn send_until<T>(mut msg: T, tx: &Sender<T>, exit: &Arc<AtomicBool>) -> anyhow::Result<()> {
-    while !exit.load(Ordering::Relaxed) {
-        match tx.send_timeout(msg, Duration::from_millis(100)) {
-            Ok(_) => return Ok(()),
-            Err(SendTimeoutError::Timeout(x)) => {
-                msg = x;
-                continue;
-            }
-            Err(SendTimeoutError::Disconnected(_)) => {
-                bail!("failed to send over disconnected work channel")
-            }
-        }
-    }
-
-    if exit.load(Ordering::Relaxed) {
-        bail!("exiting due to worker error")
-    }
-
-    Ok(())
-}
-
-fn ingest_worker(rx: Receiver<String>, wg: WaitGroup, exit: Arc<AtomicBool>, endpoint: String) {
-    if let Err(e) = ingest_worker_inner(rx, exit.clone(), endpoint) {
-        tracing::error!(error = ?e, "worker failed with error");
-        exit.swap(true, Ordering::Relaxed);
-    }
-    drop(wg)
-}
-
-fn ingest_worker_inner(
-    rx: Receiver<String>,
-    exit: Arc<AtomicBool>,
-    endpoint: String,
-) -> anyhow::Result<()> {
-    let agent: Agent = Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into();
-
-    while !exit.load(Ordering::Relaxed) {
-        match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(x) => {
-                let event = match Event::from_str(&x) {
-                    Ok(y) => y,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "failed to parse event");
-                        continue;
-                    }
-                };
-                let Event::Event(FullEvent::Edit(event)) = event else {
-                    continue;
-                };
-                if event.shared.wiki != "enwiki" {
-                    continue;
-                }
-
-                let resp = agent
-                    .post(&endpoint)
-                    .send(x)
-                    .context("failed to send request")?;
-                if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
-                    bail!("server returned bad status code: {}", resp.status());
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => bail!("work channel disconnected"),
-        }
-    }
-
-    Ok(())
-}
-
 fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {
     let data_files = get_data_files(data_dir).context("failed to read data dir")?;
 
     let mut total_parsed = 0u64;
     for data_file in data_files {
+        tracing::info!(filename = %data_file.display(), "reading new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
         for (idx, line) in ib.lines().enumerate() {
             let line = line.with_context(|| {

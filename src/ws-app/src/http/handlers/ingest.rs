@@ -1,7 +1,7 @@
-use crate::db;
 use crate::db::DbError;
 use crate::http::responses::{HttpResponse, HttpResult};
 use crate::http::server::AppState;
+use crate::{DbPool, db};
 use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,9 +14,13 @@ use ws_models::{Event, FullEvent};
 #[serde(rename_all = "lowercase")]
 pub(super) enum IngestResponse {
     Ok,
+    #[allow(dead_code)]
     Accepted,
+    #[allow(dead_code)]
     Conflict,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 impl From<IngestResponse> for HttpResponse<IngestResponse> {
@@ -36,32 +40,41 @@ pub(super) async fn ingest(
     State(app_state): State<AppState>,
     body: String,
 ) -> HttpResult<IngestResponse> {
-    let event = match Event::from_str(&body) {
-        Ok(x) => x,
-        Err(e) => {
-            return Ok(IngestResponse::Error {
-                message: e.to_string(),
+    for line in body.lines() {
+        let event = match Event::from_str(line) {
+            Ok(x) => x,
+            Err(e) => {
+                return Ok(IngestResponse::Error {
+                    message: e.to_string(),
+                }
+                .into());
             }
-            .into());
-        }
-    };
+        };
 
+        ingest_one(&app_state.db_pool, event)
+            .await
+            .context("unexpected error from database")?;
+    }
+
+    Ok(IngestResponse::Ok.into())
+}
+
+async fn ingest_one(db_pool: &DbPool, event: Event) -> Result<(), DbError> {
     // Skip canary events
     let Event::Event(full_event) = event else {
-        return Ok(IngestResponse::Ok.into());
+        return Ok(());
     };
 
     let FullEvent::Edit(edit_event) = full_event else {
-        return Ok(IngestResponse::Accepted.into());
+        return Ok(());
     };
     if edit_event.shared.wiki != ENGLISH_WIKI {
-        return Ok(IngestResponse::Accepted.into());
+        return Ok(());
     }
-    let result = db::edit::create(&app_state.db_pool, edit_event).await;
 
-    Ok(match result {
-        Ok(_) => IngestResponse::Ok.into(),
-        Err(DbError::Conflict) => IngestResponse::Conflict.into(),
-        Err(e) => Err(e).context("unexpected error from database")?,
-    })
+    match db::edit::create(db_pool, edit_event).await {
+        Ok(_) => Ok(()),
+        Err(DbError::Conflict) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
