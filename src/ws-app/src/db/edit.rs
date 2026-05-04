@@ -55,7 +55,7 @@ pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result
             (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_dt_date, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
         "#,
     );
-    qb.push_values(events.into_iter(), |mut b, event| {
+    qb.push_values(events, |mut b, event| {
         b.push_bind(event.shared.schema)
             .push_bind(event.shared.namespace)
             .push_bind(event.shared.title)
