@@ -24,6 +24,8 @@ pub struct Page {
     pub title: String,
     pub url: String,
     pub edits: i64,
+    pub editors: i64,
+    pub heat: u8,
 }
 
 pub fn index(env: &Environment<'static>, args: IndexArgs) -> anyhow::Result<String> {

@@ -10,13 +10,19 @@
 <section>
     <table>
         <tr>
+            <th>Rank</th>
             <th>Page</th>
             <th>Edits</th>
+            <th>Editors</th>
+            <th>Heat</th>
         </tr>
         {% for page in pages %}
         <tr>
+            <td>{{ loop.index }}.</td>
             <td><a href="{{ page.url }}">{{ page.title }}</a></td>
             <td>{{ page.edits }}</td>
+            <td>{{ page.editors }}</td>
+            <td>{% for i in range(page.heat) %}🔥{% endfor %}</td>
         </tr>
         {% endfor %}
     </table>

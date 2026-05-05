@@ -98,11 +98,12 @@ pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result
 pub async fn most_edited_on_date(
     conn: impl PgExecutor<'_>,
     date: &NaiveDate,
-) -> Result<Vec<(i64, String, String)>, DbError> {
+) -> Result<Vec<(i64, i64, String, String)>, DbError> {
     let result = sqlx::query_as(
         r#"
         select
             count(*) as total,
+            count(distinct username) as editors,
             title,
             title_url
         from edit_events
