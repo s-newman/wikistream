@@ -1,5 +1,7 @@
+mod eventfile;
 mod ingest_state;
 
+use crate::eventfile::EventfileWriter;
 use crate::ingest_state::IngestState;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
@@ -37,9 +39,6 @@ enum Command {
         /// Event ID to resume from.
         #[arg(short, long)]
         event_id: Option<String>,
-
-        #[arg(long, default_value_t = 10_000)]
-        events_per_file: u32,
     },
     /// Read saved events from disk.
     ///
@@ -68,10 +67,7 @@ fn main() -> ExitCode {
     }
 
     if let Err(e) = match args.command {
-        Command::Stream {
-            event_id,
-            events_per_file,
-        } => stream(&args.data_dir, args.limit, event_id, events_per_file),
+        Command::Stream { event_id } => stream(&args.data_dir, event_id),
         Command::Read => read(&args.data_dir, args.limit),
         Command::Ingest { server } => ingest(&args.data_dir, args.limit, server),
     } {
@@ -262,12 +258,8 @@ fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn stream(
-    data_dir: &Path,
-    limit: u32,
-    event_id: Option<String>,
-    events_per_file: u32,
-) -> anyhow::Result<()> {
+fn stream(data_dir: &Path, event_id: Option<String>) -> anyhow::Result<()> {
+    let mut writer = EventfileWriter::new(data_dir);
     let event_id = match event_id {
         None => get_event_id_from_files(data_dir)
             .context("failed to get latest event ID from data files")?,
@@ -277,67 +269,9 @@ fn stream(
     let es = EventSource::new("https://stream.wikimedia.org/v2/stream/recentchange")
         .with_event_id(event_id);
 
-    let mut outfile: Option<BufWriter<File>> = None;
-
-    let mut event_count = 0;
     for x in es {
         match x {
-            Ok(event) => {
-                // skip events with empty data
-                if event.data.is_empty() {
-                    continue;
-                }
-
-                // if no outfile is open, parse the object to get the timestamp so we can put the
-                // timestamp in the output filename
-                // TODO: replace with get_or_insert_with when stabilized
-                // ref: https://github.com/rust-lang/rust/issues/143648
-                let mut writer = match outfile {
-                    Some(wr) => wr,
-                    None => {
-                        let Ok(partial_evt) = serde_json::from_str::<PartialEvent>(&event.data)
-                        else {
-                            tracing::warn!(
-                                data = &event.data,
-                                "failed to parse event data as partial event"
-                            );
-                            continue;
-                        };
-                        let timestamp = partial_evt.meta.dt.timestamp_millis();
-                        let fname = data_dir.join(format!("events-{timestamp}.jsonl"));
-                        let file = File::create(&fname).context("error opening new event file")?;
-                        tracing::info!(filename = %fname.display(), "starting new output file");
-
-                        BufWriter::new(file)
-                    }
-                };
-
-                writer
-                    .write_all(event.data.as_bytes())
-                    .context("error writing event data to file")?;
-                writer
-                    .write_all(b"\n")
-                    .context("error writing newline to file")?;
-                {
-                    outfile = Some(writer);
-
-                    event_count += 1;
-                    if limit > 0 && event_count >= limit {
-                        break;
-                    }
-
-                    // Rotate to next file after a set number of lines
-                    if event_count % events_per_file == 0
-                        && let Some(mut writer) = outfile.take()
-                        && let Err(e) = writer.flush()
-                    {
-                        // If we haven't flushed everything to disk, we need to quit to prevent
-                        // gaps in the data (the EventReader will try to continue after an event
-                        // ID that wasn't written to disk).
-                        Err(e).context("error flushing buffer to disk during file rotation")?
-                    }
-                }
-            }
+            Ok(event) => writer.save(event).context("failed to save event to disk")?,
             Err(e) => {
                 tracing::error!(error = %e, "unexpected error when streaming events");
                 bail!("quitting due to fatal error");
