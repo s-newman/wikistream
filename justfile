@@ -15,6 +15,12 @@ check:
 format:
     cargo fmt --all
 
+alias fmt := format
+
+# Fix linting issues caught by clippy
+fix:
+    cargo clippy --no-deps --all-targets --fix -- -D warnings
+
 # Remove build artifacts
 clean:
     cargo clean --workspace
