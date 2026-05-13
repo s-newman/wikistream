@@ -1,22 +1,20 @@
 mod eventfile;
-mod ingest_state;
+mod ingest;
 
 use crate::eventfile::EventfileWriter;
-use crate::ingest_state::IngestState;
+use crate::ingest::IngestClientBuilder;
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::{fs, io};
 use tracing::Level;
-use ureq::Agent;
-use ws_models::{Event, FullEvent};
+use ws_models::Event;
 use ws_sse::EventSource;
 
 #[derive(Parser)]
@@ -69,7 +67,7 @@ fn main() -> ExitCode {
     if let Err(e) = match args.command {
         Command::Stream { event_id } => stream(&args.data_dir, event_id),
         Command::Read => read(&args.data_dir, args.limit),
-        Command::Ingest { server } => ingest(&args.data_dir, args.limit, server),
+        Command::Ingest { server } => ingest(&args.data_dir, server),
     } {
         tracing::error!(error = ?e, "unexpected error");
         return ExitCode::FAILURE;
@@ -78,45 +76,10 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-const BATCH_SIZE: usize = 1000;
+fn ingest(data_dir: &Path, server: String) -> anyhow::Result<()> {
+    let data_files = get_data_files(data_dir).context("failed to read data dir")?;
+    let mut ingest_client = IngestClientBuilder::new().with_server(&server).build();
 
-fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
-    let mut data_files = get_data_files(data_dir).context("failed to read data dir")?;
-    let ingest_endpoint = format!("{}/ingest", server);
-    let previous_progress = IngestState::load(data_dir).context("failed to load ingest state")?;
-
-    if let Some(progress) = previous_progress {
-        if let Some(newer_file_idx) = data_files.iter().position(|x| {
-            let file_ts = match timestamp_from_file(x) {
-                Ok(ts) => ts,
-                Err(e) => {
-                    tracing::error!(error = %e, filename = %x.display(), "BUG: failed to parse timestamp from file");
-                    panic!("failed to parse timestamp from file");
-                }
-            };
-            file_ts > progress.last_ingested_ms
-        }) {
-            // If we found a file newer than the progress timestamp, resume with at most two files
-            // before that
-            let resume_file_idx = newer_file_idx.saturating_sub(2);
-            let split = data_files.split_off(resume_file_idx);
-            data_files = split;
-        } else {
-            // The timestamps in all filenames we found are older than the saved progress. Go ahead
-            // and re-ingest the most recent three files before that.
-            let resume_file_idx = data_files.len() - 3;
-            let split = data_files.split_off(resume_file_idx);
-            data_files = split;
-        }
-    }
-
-    let agent: Agent = Agent::config_builder()
-        .http_status_as_error(false)
-        .build()
-        .into();
-
-    let mut total_ingested = 0u64;
-    let mut batch: Vec<Event> = Vec::new();
     for data_file in data_files {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
         let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
@@ -125,97 +88,20 @@ fn ingest(data_dir: &Path, limit: u32, server: String) -> anyhow::Result<()> {
                     tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
                     "failed to read line"
                 })?;
-            let event = Event::from_str(&line).with_context(|| {
-                tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to parse line as event");
-                "failed to parse line as event"
-            })?;
-
-            let Event::Event(FullEvent::Edit(edit_event)) = &event else {
-                continue;
-            };
-            if edit_event.shared.wiki != "enwiki" {
-                continue;
-            }
-            batch.push(event);
-            if !batch.is_empty() && batch.len().is_multiple_of(BATCH_SIZE) {
-                ingest_batch(
-                    &mut batch,
-                    &mut total_ingested,
-                    &agent,
-                    &ingest_endpoint,
-                    data_dir,
-                )?;
-            }
-
-            if limit > 0 && total_ingested > limit.into() {
-                return Ok(());
-            }
+            ingest_client
+                .ingest(line)
+                .context("failed to ingest line")?;
         }
 
-        if !batch.is_empty() {
-            ingest_batch(
-                &mut batch,
-                &mut total_ingested,
-                &agent,
-                &ingest_endpoint,
-                data_dir,
-            )?;
-        }
-
-        if limit > 0 && total_ingested > limit.into() {
-            return Ok(());
-        }
+        ingest_client
+            .flush()
+            .context("failed to flush ingest queue")?;
     }
 
     Ok(())
 }
 
-fn ingest_batch(
-    batch: &mut Vec<Event>,
-    total_ingested: &mut u64,
-    agent: &Agent,
-    endpoint: &str,
-    data_dir: &Path,
-) -> anyhow::Result<()> {
-    let mut buf = BufWriter::new(Vec::new());
-    for event in batch.iter() {
-        serde_json::to_writer(&mut buf, event).context("failed to serialize event")?;
-        buf.write_all(b"\n").context("failed to write newline")?;
-    }
-    let buf = buf
-        .into_inner()
-        .context("failed to get inner vec from buffer")?;
-    let resp = agent
-        .post(endpoint)
-        .send(&buf)
-        .context("failed to send request")?;
-    if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
-        bail!("server returned bad status code: {}", resp.status());
-    }
-
-    *total_ingested += batch.len() as u64;
-    let last_edit = batch
-        .iter()
-        .filter_map(|e| {
-            if let Event::Event(FullEvent::Edit(edit)) = e {
-                Some(edit)
-            } else {
-                None
-            }
-        })
-        .next_back()
-        .expect("batch was empty!");
-    let ingest_state = IngestState {
-        last_ingested_ms: last_edit.shared.meta.dt.timestamp_millis(),
-    };
-    if let Err(e) = ingest_state.save(data_dir) {
-        tracing::error!(error = %e, "failed to record ingest progress");
-    }
-    batch.clear();
-
-    Ok(())
-}
-
+#[expect(dead_code)]
 fn timestamp_from_file(file: &Path) -> anyhow::Result<i64> {
     let Some(filename) = file.file_name() else {
         bail!("no file name");
