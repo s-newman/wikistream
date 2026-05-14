@@ -58,7 +58,12 @@ docker-run-app: docker-build-app
 
 # Run ws-sse-cli in a docker container
 docker-run-cli: docker-build-cli
-    docker run --restart unless-stopped -d -v "$(pwd)/data:/var/local/ws-sse-cli" ws-sse-cli:latest
+    docker run \
+        --restart unless-stopped \
+        -d \
+        -v "$(pwd)/data:/var/local/ws-sse-cli" \
+        ws-sse-cli:latest \
+        stream --server http://wikistream.altoidtin.com
 
 # Start a local Postgres database in a docker container for development
 db-up:

@@ -40,7 +40,6 @@ impl IngestClientBuilder {
         }
     }
 
-    #[expect(dead_code)] // Will be used by stream mode for smaller, more frequent ingest batches
     pub fn with_batch_size(self, batch_size: usize) -> Self {
         Self { batch_size, ..self }
     }
@@ -65,6 +64,12 @@ pub struct IngestClient {
 impl IngestClient {
     /// Queue an event for ingest.
     pub fn ingest(&mut self, line: String) -> anyhow::Result<()> {
+        // Skip events with empty data
+        // The first event received from EventStreams upon connection will always be empty
+        if line.is_empty() {
+            return Ok(());
+        }
+
         let event = Event::from_str(&line).context("failed to parse line as event")?;
 
         let Event::Event(FullEvent::Edit(edit_event)) = &event else {

@@ -22,7 +22,7 @@ impl EventfileWriter {
         }
     }
 
-    pub fn save(&mut self, event: Event) -> anyhow::Result<()> {
+    pub fn save(&mut self, event: &Event) -> anyhow::Result<()> {
         // Skip events with empty data
         if event.data.is_empty() {
             return Ok(());
@@ -32,7 +32,7 @@ impl EventfileWriter {
         // ref: https://github.com/rust-lang/rust/issues/143648
         let writer = match &mut self.outfile {
             Some(x) => x,
-            None => match self.start_new_file(&event)? {
+            None => match self.start_new_file(event)? {
                 Some(y) => y,
                 None => {
                     // We have to skip the event because we can't parse a timestamp from it for the

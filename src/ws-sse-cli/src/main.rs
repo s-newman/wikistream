@@ -2,7 +2,7 @@ mod eventfile;
 mod ingest;
 
 use crate::eventfile::EventfileWriter;
-use crate::ingest::IngestClientBuilder;
+use crate::ingest::{IngestClient, IngestClientBuilder};
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
@@ -12,7 +12,11 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
-use std::{fs, io};
+use std::sync::mpsc::TrySendError;
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::thread::sleep;
+use std::time::Duration;
+use std::{fs, io, thread};
 use tracing::Level;
 use ws_models::Event;
 use ws_sse::EventSource;
@@ -37,6 +41,9 @@ enum Command {
         /// Event ID to resume from.
         #[arg(short, long)]
         event_id: Option<String>,
+
+        #[arg(long, short, default_value = "http://localhost:4000")]
+        server: String,
     },
     /// Read saved events from disk.
     ///
@@ -65,7 +72,7 @@ fn main() -> ExitCode {
     }
 
     if let Err(e) = match args.command {
-        Command::Stream { event_id } => stream(&args.data_dir, event_id),
+        Command::Stream { event_id, server } => stream(&args.data_dir, event_id, &server),
         Command::Read => read(&args.data_dir, args.limit),
         Command::Ingest { server } => ingest(&args.data_dir, server),
     } {
@@ -144,8 +151,29 @@ fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn stream(data_dir: &Path, event_id: Option<String>) -> anyhow::Result<()> {
+/// When streaming, we want to ingest event batches to the server more
+/// frequently, so we'll use smaller batches.
+const STREAM_BATCH_SIZE: usize = 100;
+
+enum IngestWorkerCmd {
+    Line(String),
+    Quit,
+}
+
+fn stream(data_dir: &Path, event_id: Option<String>, server: &str) -> anyhow::Result<()> {
     let mut writer = EventfileWriter::new(data_dir);
+    let ingest_client = IngestClientBuilder::new()
+        .with_server(server)
+        .with_batch_size(STREAM_BATCH_SIZE)
+        .build();
+    // Using a bounded channel to send raw events to the ingest client, so if
+    // there are problems sending data we don't try to queue an unbounded
+    // number of raw events in the channel.
+    //
+    // This means we're more likely to drop events instead of ingest them, but
+    // we can catch those with regularly-scheduled backfills and monitoring.
+    let (tx, rx) = sync_channel::<IngestWorkerCmd>(STREAM_BATCH_SIZE);
+    let handle = thread::spawn(move || stream_ingest_worker(rx, ingest_client));
     let event_id = match event_id {
         None => get_event_id_from_files(data_dir)
             .context("failed to get latest event ID from data files")?,
@@ -155,9 +183,63 @@ fn stream(data_dir: &Path, event_id: Option<String>) -> anyhow::Result<()> {
     let es = EventSource::new("https://stream.wikimedia.org/v2/stream/recentchange")
         .with_event_id(event_id);
 
+    let inner_result = stream_loop(es, &mut writer, &tx);
+
+    if let Err(e) = tx.try_send(IngestWorkerCmd::Quit) {
+        tracing::error!(error = %e, "failed to send quit command to ingest worker");
+    }
+
+    if !handle.is_finished() {
+        // TODO: this is a very arbitrary amount of time to wait. need to check timeouts on the
+        // ingest client to find a more appropriate duration to wait for the ingest worker to
+        // cleanly exit
+        sleep(Duration::from_secs(3));
+    }
+
+    if handle.is_finished() {
+        match handle.join() {
+            Ok(Err(e)) => tracing::error!(error = %e, "ingest worker exited with error"),
+            Err(e) => {
+                // ref: https://users.rust-lang.org/t/std-thread-join-return-type/63395/4
+                let err_msg = match (e.downcast_ref::<&str>(), e.downcast_ref::<String>()) {
+                    (Some(&s), _) => s,
+                    (_, Some(s)) => s,
+                    (None, None) => "<No panic info>",
+                };
+                tracing::error!("ingest worker thread panicked with: {}", err_msg);
+            }
+            _ => (),
+        }
+    } else {
+        tracing::error!("ingest worker thread is not finished - it will be orphaned!");
+    }
+
+    inner_result
+}
+
+fn stream_loop(
+    es: EventSource,
+    writer: &mut EventfileWriter,
+    tx: &SyncSender<IngestWorkerCmd>,
+) -> anyhow::Result<()> {
     for x in es {
         match x {
-            Ok(event) => writer.save(event).context("failed to save event to disk")?,
+            Ok(event) => {
+                writer
+                    .save(&event)
+                    .context("failed to save event to disk")?;
+                match tx.try_send(IngestWorkerCmd::Line(event.data)) {
+                    Ok(_) => (),
+                    Err(TrySendError::Full(_)) => {
+                        // TODO: metrics
+                        tracing::warn!("could not ingest event because worker queue was full");
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        tracing::error!("ingest worker has disconnected from queue");
+                        bail!("ingest worker disconnected from queue");
+                    }
+                }
+            }
             Err(e) => {
                 tracing::error!(error = %e, "unexpected error when streaming events");
                 bail!("quitting due to fatal error");
@@ -166,6 +248,29 @@ fn stream(data_dir: &Path, event_id: Option<String>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn stream_ingest_worker(
+    rx: Receiver<IngestWorkerCmd>,
+    mut ingest_client: IngestClient,
+) -> anyhow::Result<()> {
+    loop {
+        match rx.recv() {
+            Ok(IngestWorkerCmd::Line(line)) => {
+                if let Err(e) = ingest_client.ingest(line) {
+                    tracing::error!(error = ?e, "ingest worker failed to queue event for ingest");
+                    return Err(e).context("ingest worker failed to queue event for ingest");
+                }
+            }
+            Ok(IngestWorkerCmd::Quit) => return ingest_client.flush(),
+            Err(e) => {
+                // Logging now because it might be a while before the parent
+                // process joins the handle and discovers the error
+                tracing::error!(error = %e, "ingest worker failed to receive from the channel");
+                return Err(e).context("ingest worker failed to receive from the channel")?;
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
