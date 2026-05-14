@@ -3,8 +3,8 @@ mod ingest;
 
 use crate::eventfile::EventfileWriter;
 use crate::ingest::{IngestClient, IngestClientBuilder};
-use anyhow::{Context, bail};
-use chrono::{DateTime, Utc};
+use anyhow::{Context, anyhow, bail};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -53,6 +53,14 @@ enum Command {
     Ingest {
         #[arg(long, short, default_value = "http://localhost:4000")]
         server: String,
+
+        /// If specified, start ingesting events from this time or later.
+        #[arg(long)]
+        start: Option<String>,
+
+        /// If specified, don't ingest any events after this time.
+        #[arg(long)]
+        end: Option<String>,
     },
 }
 
@@ -74,7 +82,12 @@ fn main() -> ExitCode {
     if let Err(e) = match args.command {
         Command::Stream { event_id, server } => stream(&args.data_dir, event_id, &server),
         Command::Read => read(&args.data_dir, args.limit),
-        Command::Ingest { server } => ingest(&args.data_dir, server),
+        Command::Ingest { server, start, end } => {
+            // TODO: more ergonomic date/time specification, better error reporting
+            let start = start.map(parse_date_arg).transpose().unwrap();
+            let end = end.map(parse_date_arg).transpose().unwrap();
+            ingest(&args.data_dir, server, start, end)
+        }
     } {
         tracing::error!(error = ?e, "unexpected error");
         return ExitCode::FAILURE;
@@ -83,13 +96,64 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn ingest(data_dir: &Path, server: String) -> anyhow::Result<()> {
+fn parse_date_arg(arg: String) -> anyhow::Result<DateTime<Utc>> {
+    if let Ok(dt) = arg.parse::<DateTime<Utc>>() {
+        return Ok(dt);
+    }
+
+    if let Ok(dt) = arg.parse::<NaiveDateTime>() {
+        return Ok(dt.and_utc());
+    }
+
+    if let Ok(dt) = arg.parse::<NaiveDate>() {
+        return Ok(NaiveDateTime::from(dt).and_utc());
+    }
+
+    bail!("failed to parse arg as date");
+}
+
+fn ingest(
+    data_dir: &Path,
+    server: String,
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+) -> anyhow::Result<()> {
     let data_files = get_data_files(data_dir).context("failed to read data dir")?;
     let mut ingest_client = IngestClientBuilder::new().with_server(&server).build();
 
-    for data_file in data_files {
+    // Find first data file if --start specified (should be the last file with a timestamp before
+    // the --start timestamp)
+    let mut start_idx = 0_usize;
+    if let Some(start) = start {
+        for (idx, data_file) in data_files.iter().enumerate() {
+            if timestamp_from_file(data_file).context("failed to read timestamp from filename")?
+                < start
+            {
+                start_idx = idx;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Find the last data file if --end specified (same thing, looking for the first file with a
+    // timestamp after the --end timestamp)
+    let mut end_idx = data_files.len() - 1;
+    if let Some(end) = end {
+        for (idx, data_file) in data_files.iter().enumerate() {
+            // TODO: this is inefficient, we're re-parsing the timestamps from every filename
+            if timestamp_from_file(data_file).context("failed to read timestamp from filename")?
+                > end
+            {
+                end_idx = idx;
+                break;
+            }
+        }
+    }
+
+    for data_file in &data_files[start_idx..=end_idx] {
         tracing::info!(filename = %data_file.display(), "ingesting new data file");
-        let ib = BufReader::new(File::open(&data_file).context("failed to open data file")?);
+        let ib = BufReader::new(File::open(data_file).context("failed to open data file")?);
         for (idx, line) in ib.lines().enumerate() {
             let line = line.with_context(|| {
                     tracing::error!(lineno = idx + 1, filename=%data_file.to_string_lossy(), "failed to read line");
@@ -108,8 +172,7 @@ fn ingest(data_dir: &Path, server: String) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[expect(dead_code)]
-fn timestamp_from_file(file: &Path) -> anyhow::Result<i64> {
+fn timestamp_from_file(file: &Path) -> anyhow::Result<DateTime<Utc>> {
     let Some(filename) = file.file_name() else {
         bail!("no file name");
     };
@@ -121,7 +184,10 @@ fn timestamp_from_file(file: &Path) -> anyhow::Result<i64> {
         bail!("wrong filename suffix");
     };
 
-    i64::from_str(timestamp).context("failed to parse filename part as timestamp")
+    let millis = i64::from_str(timestamp).context("failed to parse filename part as timestamp")?;
+
+    DateTime::from_timestamp_millis(millis)
+        .ok_or_else(|| anyhow!("timestamp from filename was out of bounds: {}", millis))
 }
 
 fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {

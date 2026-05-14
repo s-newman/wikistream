@@ -109,7 +109,10 @@ impl IngestClient {
             .post(&self.endpoint)
             .send(&req_body)
             .context("failed to send ingest request")?;
-        if resp.status() != StatusCode::OK && resp.status() != StatusCode::CONFLICT {
+        if resp.status() != StatusCode::OK
+            && resp.status() != StatusCode::CONFLICT
+            && resp.status() != StatusCode::ACCEPTED
+        {
             bail!("server returned bad status code: {}", resp.status());
         }
 
