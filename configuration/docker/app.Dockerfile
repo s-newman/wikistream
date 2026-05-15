@@ -19,4 +19,6 @@ EXPOSE 4000
 COPY --from=builder /app/target/release/ws-app /usr/local/bin
 RUN mkdir /var/www/assets
 COPY --from=builder /app/src/ws-app/assets /var/www/assets
+RUN mkdir /var/www/templates
+COPY --from=builder /app/src/ws-app/templates /var/www/templates
 ENTRYPOINT ["/usr/local/bin/ws-app"]

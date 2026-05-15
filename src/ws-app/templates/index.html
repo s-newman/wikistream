@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Wikistream{% endblock %}
+{% block main %}
+<ul id="pages-list">
+    {% for page in pages %}
+    <li class="page-entry">
+        <div class="page-rank">{{ loop.index }}</div>
+        <div class="page-content">
+            <div class="page-title">
+                <a href="{{ page.url }}">{{ page.title }}</a>
+            </div>
+            <div class="page-details">
+                {{ page.edits }} edits
+                | {{ page.editors }} editors
+                {% if page.heat > 0 %}
+                | {% for i in range(page.heat) %}🔥{% endfor %}
+                {% endif %}
+            </div>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+<section>
+    {% if previous_day is not none %}
+    <a href="/?date={{ previous_day }}">&laquo; Previous Day</a>
+    {% endif %}
+    <span>{{ date }}</span>
+    {% if next_day is not none %}
+    <a href="/?date={{ next_day }}">Next Day &raquo;</a>
+    {% endif %}
+</section>
+<section>
+    <form action="/" method="get">
+        <label for="date">Date</label>
+        <input id="date" type="date" name="date" value="{{ date }}"/>
+        <input type="submit" value="Check"/>
+    </form>
+</section>
+{% endblock %}

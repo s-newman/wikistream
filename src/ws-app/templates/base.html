@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>{% block title %}{% endblock %}</title>
+    <link rel="icon" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+
+<header>
+    <nav>
+        <a id="home-link" href="/">
+            <img src="/assets/favicon.svg" height="24" width="24" />
+            Wikistream
+        </a>
+        <a href="/daily">daily</a>
+        |
+        <a href="/weekly">weekly</a>
+    </nav>
+</header>
+
+{% block main %}{% endblock %}
+
+<footer>
+    <p>Favicon from <a href="https://streamlinehq.com/">Streamline</a></p>
+</footer>
+
+</body>
+</html>

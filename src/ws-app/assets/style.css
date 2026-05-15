@@ -1,0 +1,43 @@
+body {
+    margin: 40px auto;
+    max-width: 800px;
+    line-height: 1.6;
+    padding: 0 10px;
+}
+
+#home-link {
+    color: inherit;
+    text-decoration: inherit;
+}
+
+#pages-list {
+    display: grid;
+    grid-template-columns: max-content auto;
+}
+
+.page-entry {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: subgrid;
+}
+
+.page-rank {
+    margin-right: 0.5em;
+    font-size: 1.5em;
+    align-self: center;
+    justify-self: end;
+}
+
+.page-title {
+    font-size: 1.25em;
+}
+
+.page-details {
+    font-size: 1em;
+}
+
+.page-content {
+    display: grid;
+    grid-template-rows: auto auto;
+    justify-self: start;
+}

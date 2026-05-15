@@ -1,14 +1,11 @@
 use anyhow::Context;
 use chrono::NaiveDate;
-use minijinja::{Environment, context};
+use minijinja::{Environment, context, path_loader};
 use serde::Serialize;
 
 pub fn init() -> anyhow::Result<Environment<'static>> {
     let mut env = Environment::new();
-
-    env.add_template("index.html", include_str!("templates/index.html"))
-        .context("failed to load template")?;
-
+    env.set_loader(path_loader("templates"));
     Ok(env)
 }
 
