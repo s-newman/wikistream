@@ -221,6 +221,12 @@ fn read(data_dir: &Path, limit: u32) -> anyhow::Result<()> {
 /// frequently, so we'll use smaller batches.
 const STREAM_BATCH_SIZE: usize = 100;
 
+/// Arbitrarily-selected max size for ingest worker queue.
+///
+/// Temporary increase to reduce the frequency we get a full queue. Need to do some analysis to
+/// figure out an appropriate upper bound.
+const INGEST_WORKER_QUEUE_SIZE: usize = STREAM_BATCH_SIZE * 10;
+
 enum IngestWorkerCmd {
     Line(String),
     Quit,
@@ -238,7 +244,7 @@ fn stream(data_dir: &Path, event_id: Option<String>, server: &str) -> anyhow::Re
     //
     // This means we're more likely to drop events instead of ingest them, but
     // we can catch those with regularly-scheduled backfills and monitoring.
-    let (tx, rx) = sync_channel::<IngestWorkerCmd>(STREAM_BATCH_SIZE);
+    let (tx, rx) = sync_channel::<IngestWorkerCmd>(INGEST_WORKER_QUEUE_SIZE);
     let handle = thread::spawn(move || stream_ingest_worker(rx, ingest_client));
     let event_id = match event_id {
         None => get_event_id_from_files(data_dir)
