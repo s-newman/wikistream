@@ -1,5 +1,5 @@
 use crate::db::{DbError, Id};
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::types::Json;
 use sqlx::{PgExecutor, Postgres, QueryBuilder};
 use ws_models::Edit;
@@ -95,10 +95,18 @@ pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result
     Ok(())
 }
 
+#[derive(sqlx::FromRow)]
+pub struct EditPageView {
+    pub total: i64,
+    pub editors: i64,
+    pub title: String,
+    pub title_url: String,
+}
+
 pub async fn most_edited_on_date(
     conn: impl PgExecutor<'_>,
     date: &NaiveDate,
-) -> Result<Vec<(i64, i64, String, String)>, DbError> {
+) -> Result<Vec<EditPageView>, DbError> {
     let result = sqlx::query_as(
         r#"
         select
@@ -116,6 +124,36 @@ pub async fn most_edited_on_date(
         "#,
     )
     .bind(date)
+    .fetch_all(conn)
+    .await?;
+
+    Ok(result)
+}
+
+pub async fn most_edited_between(
+    conn: impl PgExecutor<'_>,
+    start: &DateTime<Utc>,
+    end: &DateTime<Utc>,
+) -> Result<Vec<EditPageView>, DbError> {
+    let result = sqlx::query_as(
+        r#"
+        select
+            count(*) as total,
+            count(distinct username) as editors,
+            title,
+            title_url
+        from edit_events
+        where
+            namespace in (0, 1)
+            and meta_dt > $1
+            and meta_dt < $2
+        group by title, title_url
+        order by total desc
+        limit 25
+        "#,
+    )
+    .bind(start)
+    .bind(end)
     .fetch_all(conn)
     .await?;
 

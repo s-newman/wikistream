@@ -6,6 +6,7 @@ use tower_http::services::ServeDir;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
+mod daily;
 mod health;
 mod index;
 mod ingest;
@@ -13,6 +14,8 @@ mod ingest;
 pub fn router(app_state: AppState) -> Router {
     Router::new()
         .route("/", get(index::handler))
+        .route("/daily", get(daily::index))
+        .route("/daily/{date}", get(daily::date))
         .route("/health", get(health::health))
         .route("/ingest", post(ingest::ingest))
         .nest_service("/assets", ServeDir::new("assets"))
