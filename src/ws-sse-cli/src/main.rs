@@ -21,8 +21,11 @@ use tracing::Level;
 use ws_models::Event;
 use ws_sse::EventSource;
 
+const ENV_VERSION: Option<&'static str> = option_env!("WS_VERSION");
+const FALLBACK_VERSION: &str = "Unknown-Version";
+
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version = ENV_VERSION.unwrap_or(FALLBACK_VERSION), about)]
 struct Args {
     #[arg(short, long, default_value = "./data")]
     data_dir: PathBuf,

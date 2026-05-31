@@ -3,6 +3,13 @@ stages:
   - build
   - deploy
 
+variables:
+  # Disable shallow clones. We need the full git history (or at least, a lot of
+  # git history) to generate the version string, because I haven't been tagging
+  # releases very often so git may have to look pretty far back to find the
+  # last tag.
+  GIT_DEPTH: 0
+
 check-job:
   stage: check
   tags:
@@ -27,7 +34,7 @@ build:docker-app:
   tags:
     - altoidtin-vm
   script:
-    - docker build -t ws-app:latest -f configuration/docker/app.Dockerfile .
+    - scripts/docker-build.sh ws-app app.Dockerfile
     - docker save --output ws-app.tar ws-app:latest
   artifacts:
     when: always
@@ -40,7 +47,7 @@ build:docker-cli:
   tags:
     - altoidtin-vm
   script:
-    - docker build -t ws-sse-cli:latest -f configuration/docker/cli.Dockerfile .
+    - scripts/docker-build.sh ws-sse-cli cli.Dockerfile
     - docker save --output ws-sse-cli.tar ws-sse-cli:latest
   artifacts:
     when: always
@@ -59,12 +66,8 @@ deploy-job:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY --username $CI_REGISTRY_USER --password-stdin
   script:
-    - docker load --input ws-app.tar
-    - docker load --input ws-sse-cli.tar
-    - docker tag ws-app:latest $CI_REGISTRY_IMAGE/ws-app:latest
-    - docker tag ws-sse-cli:latest $CI_REGISTRY_IMAGE/ws-sse-cli:latest
-    - docker image push $CI_REGISTRY_IMAGE/ws-app:latest
-    - docker image push $CI_REGISTRY_IMAGE/ws-sse-cli:latest
+    - script/load-and-push-image.sh ws-app
+    - script/load-and-push-image.sh ws-sse-cli
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: on_success

@@ -1,11 +1,16 @@
-set dotenv-load
+set dotenv-load := true
+
+# Set version string for commands like `cargo run` that don't run the
+# get-tag.sh script
+
+export WS_VERSION := `scripts/get-tag.sh`
 
 # Build and check (run me before committing)
 default: build check
 
 # Build
 build *ARGS:
-    scripts/build.sh {{ARGS}}
+    scripts/build.sh {{ ARGS }}
 
 # Run linters
 check:
@@ -27,26 +32,28 @@ clean:
 
 # Run ws-sse-cli
 run *ARGS:
-    cargo run --package ws-sse-cli -- {{ARGS}}
+    cargo run --package ws-sse-cli -- {{ ARGS }}
 
 # Run ws-app
-[working-directory: 'src/ws-app']
+[working-directory('src/ws-app')]
 run-app *ARGS:
-    cargo run --package ws-app -- {{ARGS}}
+    cargo run --package ws-app -- {{ ARGS }}
 
 # Build all docker containers
 docker-build: docker-build-app docker-build-cli
 
 # Build a docker container to run ws-app
 docker-build-app:
-    docker build -t ws-app:latest -f configuration/docker/app.Dockerfile .
+    scripts/docker-build.sh ws-app app.Dockerfile
 
 # Build a docker container to run ws-sse-cli
 docker-build-cli:
-    docker build -t ws-sse-cli:latest -f configuration/docker/cli.Dockerfile .
+    scripts/docker-build.sh ws-sse-cli cli.Dockerfile
 
 # Run ws-app in a docker container
 docker-run-app: docker-build-app
+    #!/bin/bash
+    tag="$(docker image inspect ws-app:latest | jq -r '.[0].RepoTags[]' | grep -v ':latest')"
     docker run \
         --restart unless-stopped \
         -d \
@@ -54,15 +61,17 @@ docker-run-app: docker-build-app
         --network docker_default \
         --env-file .env \
         -e PGHOST=db \
-        ws-app:latest
+        "${tag}"
 
 # Run ws-sse-cli in a docker container
 docker-run-cli: docker-build-cli
+    #!/bin/bash
+    tag="$(docker image inspect ws-sse-cli:latest | jq -r '.[0].RepoTags[]' | grep -v ':latest')"
     docker run \
         --restart unless-stopped \
         -d \
         -v "$(pwd)/data:/var/local/ws-sse-cli" \
-        ws-sse-cli:latest \
+        "${tag}" \
         stream --server http://wikistream.altoidtin.com
 
 # Start a local Postgres database in a docker container for development
