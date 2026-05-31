@@ -66,8 +66,8 @@ deploy-job:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY --username $CI_REGISTRY_USER --password-stdin
   script:
-    - script/load-and-push-image.sh ws-app
-    - script/load-and-push-image.sh ws-sse-cli
+    - scripts/load-and-push-image.sh ws-app
+    - scripts/load-and-push-image.sh ws-sse-cli
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: on_success
