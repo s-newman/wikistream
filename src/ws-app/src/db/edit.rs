@@ -1,49 +1,40 @@
 use crate::db::{DbError, Id};
 use chrono::{DateTime, NaiveDate, Utc};
-use sqlx::types::Json;
 use sqlx::{PgExecutor, Postgres, QueryBuilder};
 use ws_models::Edit;
 
 pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbError> {
     let (result,) = sqlx::query_as(
         r#"
-        insert into edit_events
-            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_dt_date, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
+        insert into edit_events (
+            namespace,
+            title,
+            title_url,
+            timestamp,
+            username,
+            wiki,
+            meta_request_id,
+            meta_id,
+            meta_dt,
+            meta_dt_date,
+        )
         values
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         returning event_id
         "#,
     )
-        .bind(event.shared.schema)
-        .bind(event.shared.namespace)
-        .bind(event.shared.title)
-        .bind(event.shared.title_url)
-        .bind(event.shared.comment)
-        .bind(event.shared.timestamp)
-        .bind(event.shared.user)
-        .bind(event.shared.bot)
-        .bind(event.shared.server_url)
-        .bind(event.shared.server_name)
-        .bind(event.shared.server_script_path)
-        .bind(event.shared.wiki)
-        .bind(event.shared.parsedcomment)
-        .bind(event.shared.meta.uri)
-        .bind(event.shared.meta.request_id)
-        .bind(event.shared.meta.id)
-        .bind(event.shared.meta.domain)
-        .bind(event.shared.meta.stream)
-        .bind(event.shared.meta.dt)
-        .bind(event.shared.meta.dt.date_naive())
-        .bind(event.shared.meta.topic)
-        .bind(event.shared.meta.partition)
-        .bind(event.shared.meta.offset)
-        .bind(event.inner.id)
-        .bind(event.inner.notify_url)
-        .bind(event.inner.minor)
-        .bind(Json(event.inner.length))
-        .bind(Json(event.inner.revision))
-        .fetch_one(conn)
-        .await?;
+    .bind(event.shared.namespace)
+    .bind(event.shared.title)
+    .bind(event.shared.title_url)
+    .bind(event.shared.timestamp)
+    .bind(event.shared.user)
+    .bind(event.shared.wiki)
+    .bind(event.shared.meta.request_id)
+    .bind(event.shared.meta.id)
+    .bind(event.shared.meta.dt)
+    .bind(event.shared.meta.dt.date_naive())
+    .fetch_one(conn)
+    .await?;
 
     Ok(result)
 }
@@ -51,39 +42,31 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
 pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result<(), DbError> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
-        insert into edit_events
-            (schema, namespace, title, title_url, comment, timestamp, username, bot, server_url, server_name, server_script_path, wiki, parsedcomment, meta_uri, meta_request_id, meta_id, meta_domain, meta_stream, meta_dt, meta_dt_date, meta_topic, meta_partition, meta_offset, id, notify_url, minor, length, revision)
+        insert into edit_events (
+            namespace,
+            title,
+            title_url,
+            timestamp,
+            username,
+            wiki,
+            meta_request_id,
+            meta_id,
+            meta_dt,
+            meta_dt_date,
+        )
         "#,
     );
     qb.push_values(events, |mut b, event| {
-        b.push_bind(event.shared.schema)
-            .push_bind(event.shared.namespace)
+        b.push_bind(event.shared.namespace)
             .push_bind(event.shared.title)
             .push_bind(event.shared.title_url)
-            .push_bind(event.shared.comment)
             .push_bind(event.shared.timestamp)
             .push_bind(event.shared.user)
-            .push_bind(event.shared.bot)
-            .push_bind(event.shared.server_url)
-            .push_bind(event.shared.server_name)
-            .push_bind(event.shared.server_script_path)
             .push_bind(event.shared.wiki)
-            .push_bind(event.shared.parsedcomment)
-            .push_bind(event.shared.meta.uri)
             .push_bind(event.shared.meta.request_id)
             .push_bind(event.shared.meta.id)
-            .push_bind(event.shared.meta.domain)
-            .push_bind(event.shared.meta.stream)
             .push_bind(event.shared.meta.dt)
-            .push_bind(event.shared.meta.dt.date_naive())
-            .push_bind(event.shared.meta.topic)
-            .push_bind(event.shared.meta.partition)
-            .push_bind(event.shared.meta.offset)
-            .push_bind(event.inner.id)
-            .push_bind(event.inner.notify_url)
-            .push_bind(event.inner.minor)
-            .push_bind(Json(event.inner.length))
-            .push_bind(Json(event.inner.revision));
+            .push_bind(event.shared.meta.dt.date_naive());
     });
     qb.push(
         r#"
