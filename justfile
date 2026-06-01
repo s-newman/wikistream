@@ -54,6 +54,8 @@ docker-build-cli:
 docker-run-app: docker-build-app
     #!/bin/bash
     tag="$(docker image inspect ws-app:latest | jq -r '.[0].RepoTags[]' | grep -v ':latest')"
+    docker stop ws-app || true
+    docker rm ws-app || true
     docker run \
         --restart unless-stopped \
         -d \
@@ -61,16 +63,20 @@ docker-run-app: docker-build-app
         --network docker_default \
         --env-file .env \
         -e PGHOST=db \
+        --name ws-app \
         "${tag}"
 
 # Run ws-sse-cli in a docker container
 docker-run-cli: docker-build-cli
     #!/bin/bash
     tag="$(docker image inspect ws-sse-cli:latest | jq -r '.[0].RepoTags[]' | grep -v ':latest')"
+    docker stop ws-sse-cli || true
+    docker rm ws-sse-cli || true
     docker run \
         --restart unless-stopped \
         -d \
         -v "$(pwd)/data:/var/local/ws-sse-cli" \
+        --name ws-sse-cli \
         "${tag}" \
         stream --server http://wikistream.altoidtin.com
 
