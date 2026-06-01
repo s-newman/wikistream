@@ -13,6 +13,7 @@ DOCKERFILE="configuration/docker/${2}"
 WS_VERSION="$(scripts/get-tag.sh)"
 
 docker build \
+  --build-arg "WS_VERSION=${WS_VERSION}" \
   -t "${NAME}:latest" \
   -t "${NAME}:${WS_VERSION}" \
   -f "${DOCKERFILE}" \
