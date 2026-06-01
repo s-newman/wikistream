@@ -16,7 +16,7 @@ pub async fn create(conn: impl PgExecutor<'_>, event: Edit) -> Result<Id, DbErro
             meta_request_id,
             meta_id,
             meta_dt,
-            meta_dt_date,
+            meta_dt_date
         )
         values
             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -52,7 +52,7 @@ pub async fn bulk_create(conn: impl PgExecutor<'_>, events: Vec<Edit>) -> Result
             meta_request_id,
             meta_id,
             meta_dt,
-            meta_dt_date,
+            meta_dt_date
         )
         "#,
     );
