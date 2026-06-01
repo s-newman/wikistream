@@ -4,10 +4,12 @@ use minijinja::{Environment, context, path_loader};
 use serde::Serialize;
 
 use crate::db::edit::EditPageView;
+use crate::version;
 
 pub fn init() -> anyhow::Result<Environment<'static>> {
     let mut env = Environment::new();
     env.set_loader(path_loader("templates"));
+    env.add_global("version", version());
     Ok(env)
 }
 
