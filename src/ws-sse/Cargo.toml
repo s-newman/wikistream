@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 tracing = "0.1.44"
 ureq = "3.3.0"
+
+[lib]
+test = false
+doctest = false

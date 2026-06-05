@@ -41,7 +41,7 @@ pub enum FullEvent {
     New(New),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Shared {
     #[serde(rename = "$schema")]
     pub schema: String,
@@ -60,7 +60,7 @@ pub struct Shared {
     pub parsedcomment: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Meta {
     pub uri: String,
     pub request_id: String,

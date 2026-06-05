@@ -12,9 +12,16 @@ default: build check
 build *ARGS:
     scripts/build.sh {{ ARGS }}
 
+# Run linters & tests
+check: lint test
+
 # Run linters
-check:
+lint:
     scripts/check.sh
+
+# Run tests
+test:
+    cargo test --workspace
 
 # Reformat code
 format:

@@ -1,5 +1,5 @@
-mod handlers;
+pub(super) mod handlers;
 mod responses;
-mod server;
+pub(super) mod server;
 
 pub use server::{HttpServer, HttpServerConfig};

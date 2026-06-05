@@ -5,10 +5,13 @@ edition = "2024"
 
 [lib]
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "ws-app"
 path = "src/bin/main.rs"
+test = false
+doctest = false
 
 [dependencies]
 anyhow = "1.0.102"
@@ -25,3 +28,6 @@ minijinja = "2.19.0"
 tower-http = { version = "0.6.8", features = ["fs", "trace"] }
 chrono = "0.4.44"
 tower = "0.5.3"
+
+[dev-dependencies]
+http-body-util = "0.1.3"

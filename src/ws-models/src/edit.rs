@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Edit {
     #[serde(flatten)]
     pub shared: super::Shared,
@@ -8,7 +8,7 @@ pub struct Edit {
     pub inner: Inner,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Inner {
     pub id: i64,
     pub notify_url: String,
@@ -17,7 +17,7 @@ pub struct Inner {
     pub revision: OldNew,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OldNew {
     old: u32,
     new: u32,
