@@ -6,7 +6,7 @@ use tower_http::services::ServeDir;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
-mod daily;
+pub mod daily;
 mod health;
 mod index;
 mod ingest;

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::NaiveDate;
 use minijinja::{Environment, context, path_loader};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db::edit::EditPageView;
 use crate::version;
@@ -20,7 +20,7 @@ pub struct DailyArgs {
     pub pages: Vec<Page>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Page {
     pub title: String,
     pub url: String,
@@ -66,7 +66,7 @@ impl From<EditPageView> for Page {
     }
 }
 
-pub fn daily(env: &Environment<'static>, args: DailyArgs) -> anyhow::Result<String> {
+pub fn daily(env: &Environment, args: DailyArgs) -> anyhow::Result<String> {
     let tpl = env
         .get_template("daily.html")
         .context("failed to get template")?;
