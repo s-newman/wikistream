@@ -10,7 +10,7 @@ variables:
   # last tag.
   GIT_DEPTH: 0
 
-check-job:
+check:lint:
   stage: check
   tags:
     - altoidtin
@@ -19,7 +19,23 @@ check-job:
     - rustup component add rustfmt clippy
     - apt-get update && apt-get install -y shellcheck
   script:
-    - scripts/check.sh
+    - scripts/lint.sh
+
+check:test:
+  stage: check
+  tags:
+    - altoidtin
+  image: rust:latest
+  variables:
+    POSTGRES_USER: ws-user
+    POSTGRES_PASSWORD: gitlab-ci-password
+    POSTGRES_DB: wikistream
+    DATABASE_URL: "postgres://ws-user:gitlab-ci-password@db/wikistream"
+  services:
+    - name: postgres
+      alias: db
+  script:
+    - scripts/test.sh
 
 build-job:
   stage: build

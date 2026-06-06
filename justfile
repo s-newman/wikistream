@@ -17,11 +17,11 @@ check: lint test
 
 # Run linters
 lint:
-    scripts/check.sh
+    scripts/lint.sh
 
 # Run tests
 test:
-    cargo test --workspace
+    scripts/test.sh
 
 # Reformat code
 format:
